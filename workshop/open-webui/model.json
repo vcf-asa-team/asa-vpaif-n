@@ -1,0 +1,21 @@
+{
+  "id": "nim_openai.Meta-Llama-3-8B-Instruct",
+  "base_model_id": null,
+  "name": "NIM/Meta-Llama-3-8B-Instruct",
+  "meta": {
+    "profile_image_url": "https://logodownload.org/wp-content/uploads/2014/09/nvidia-logo-0.png",
+    "description": "",
+    "capabilities": {
+      "vision": true,
+      "usage": false
+    },
+    "tags": []
+  },
+  "params": {
+    "max_tokens": 512,
+    "stop": null
+  },
+  "user_id": "bc5fb702-81d5-4ddf-a63d-4f0c19cf8285",
+  "updated_at": 1724423184,
+  "created_at": 1724423184
+}

@@ -1,0 +1,77 @@
+version: "3"
+services:
+  open-webui:
+    # image: ghcr.io/open-webui/open-webui:main
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: open-webui
+    volumes:
+      - /opt/data/open-webui:/app/backend/data
+      - /opt/data/docs:/data/docs
+    ports:
+      - ${OPEN_WEBUI_PORT-3000}:8080
+    environment:
+      - WEBUI_AUTH=False
+      - ENABLE_OLLAMA_API=False
+      - WEBUI_NAME=${APP_NAME}
+      - OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL}
+      - OPENAI_API_KEY=nokey
+      - WEBUI_SECRET_KEY=Sup3rS3cr3t!
+      - OPEN_WEBUI_PORT=${OPEN_WEBUI_PORT}
+      - ENABLE_SIGNUP=${ENABLE_SIGNUP}
+      - ENABLE_LOGIN_FORM=${ENABLE_LOGIN_FORM}
+      - VECTOR_STORE_TYPE=${VECTOR_TYPE}
+      - PGVECTOR_CONNECTION_STR=${PG_CONNECTION_STRING}
+      # - RAG_EMBEDDING_ENGINE=${RAG_EMBEDDING_ENGINE}
+      # - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL}
+      # - RAG_OPENAI_API_BASE_URL=${RAG_API_BASE_URL}
+      # - RAG_OPENAI_API_KEY=${RAG_OPENAI_API_KEY}
+      - RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE=${RAG_EMBEDDING_MODEL_TRUST_REMOTE_CODE}
+      - ENABLE_RAG_WEB_SEARCH=${ENABLE_RAG_WEB_SEARCH}
+      - RAG_WEB_SEARCH_ENGINE=${RAG_WEB_SEARCH_ENGINE}
+      - RAG_TOP_K=${RAG_TOP_K}
+      - CHUNK_SIZE=${CHUNK_SIZE}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+  # postgres:
+  #   container_name: postgres
+  #   build:
+  #     # context: ./postgres
+  #     dockerfile: postgres.Dockerfile
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - ./data/:/var/lib/postgresql/data
+  #     - ./postgres/vector_extension.sql:/docker-entrypoint-initdb.d/0-vector_extension.sql
+  #   environment:
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=postgres
+  #     - POSTGRES_DB=vector
+  nemollm-embedding:
+    container_name: nemo-retriever-embedding-microservice
+    image: nvcr.io/ohlfw0olaadg/ea-participants/nemo-retriever-embedding-microservice:24.04
+    volumes:
+    - /opt/data/nv-embed-qa_v4:/model-checkpoint-path
+    command:  bin/web -p 9080 -c /model-checkpoint-path/NV-Embed-QA-4.nemo -g model_config_templates/NV-Embed-QA_template.yaml
+    ports:
+    - "9080:9080"
+    expose:
+    - "9080"
+    shm_size: 8gb
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['${EMBEDDING_MS_GPU_ID:-0}']
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9080/v1/health/ready"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 10m
+volumes:
+  webui_data:
