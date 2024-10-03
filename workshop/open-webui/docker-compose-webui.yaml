@@ -1,10 +1,7 @@
-version: "3"
 services:
   open-webui:
     # image: ghcr.io/open-webui/open-webui:main
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: harbor.pse.lab/paif-n/open-webui-pgvector:24.09
     container_name: open-webui
     volumes:
       - /opt/data/open-webui:/app/backend/data
@@ -51,7 +48,8 @@ services:
   #     - POSTGRES_DB=vector
   nemollm-embedding:
     container_name: nemo-retriever-embedding-microservice
-    image: nvcr.io/ohlfw0olaadg/ea-participants/nemo-retriever-embedding-microservice:24.04
+    # image: nvcr.io/ohlfw0olaadg/ea-participants/nemo-retriever-embedding-microservice:24.04
+    image: harbor.pse.lab/paif-n/nemo-retriever-embedding-microservice:24.04
     volumes:
     - /opt/data/nv-embed-qa_v4:/model-checkpoint-path
     command:  bin/web -p 9080 -c /model-checkpoint-path/NV-Embed-QA-4.nemo -g model_config_templates/NV-Embed-QA_template.yaml
