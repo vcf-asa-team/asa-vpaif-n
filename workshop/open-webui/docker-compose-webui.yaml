@@ -1,7 +1,7 @@
 services:
   open-webui:
     # image: ghcr.io/open-webui/open-webui:main
-    image: harbor.pse.lab/paif-n/open-webui-pgvector:24.10
+    image: harbor.pse.lab/paif-n/open-webui:24.11
     container_name: open-webui
     volumes:
       - /opt/data/open-webui:/app/backend/data
@@ -18,8 +18,8 @@ services:
       - OPEN_WEBUI_PORT=${OPEN_WEBUI_PORT}
       - ENABLE_SIGNUP=${ENABLE_SIGNUP}
       - ENABLE_LOGIN_FORM=${ENABLE_LOGIN_FORM}
-      - VECTOR_STORE_TYPE=${VECTOR_TYPE}
-      - PGVECTOR_CONNECTION_STR=${PG_CONNECTION_STRING}
+      - VECTOR_DB=${VECTOR_TYPE}
+      - PGVECTOR_DB_URL=${PG_CONNECTION_STRING}
       - RAG_EMBEDDING_ENGINE=${RAG_EMBEDDING_ENGINE}
       - RAG_EMBEDDING_MODEL=${RAG_EMBEDDING_MODEL}
       - RAG_OPENAI_API_BASE_URL=${RAG_API_BASE_URL}
@@ -33,7 +33,7 @@ services:
       - host.docker.internal:host-gateway
     restart: unless-stopped
   nemollm-embedding:
-    image: harbor.pse.lab/paif-n/nv-embedqa-e5-v5:1.1.0
+    image: harbor.pse.lab/paif-n/nv-embedqa-e5-v5-pb24h2:1.2.0
     volumes:
     - /opt/data/nv-embedqa-e5-v5:/opt/nim/.cache
     ports:
