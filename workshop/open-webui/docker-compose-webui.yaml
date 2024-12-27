@@ -1,7 +1,7 @@
 services:
   open-webui:
     # image: ghcr.io/open-webui/open-webui:main
-    image: harbor.pse.lab/paif-n/open-webui-gpu:24.12
+    image: harbor.pse.lab/paif-n/open-webui-gpu:24.12.1
     container_name: open-webui
     volumes:
       - /opt/data/open-webui:/app/backend/data
@@ -38,13 +38,16 @@ services:
   nemollm-embedding:
     image: harbor.pse.lab/paif-n/nv-embedqa-e5-v5-pb24h2:1.2.0
     volumes:
-    - /opt/data/nv-embedqa-e5-v5:/opt/nim/.cache
+      - /opt/data/nv-embedqa-e5-v5:/opt/nim/.cache
     ports:
-    - "8000:8000"
+      - "8000:8000"
     expose:
-    - "8000"
+      - "8000"
     environment:
       - NGC_API_KEY=${NIM_KEY}
+      - HF_HOME=/opt/nim/.cache/huggingface
+      - NUMBA_CACHE_DIR=/opt/nim/.cache/numba
+      - NIM_MODEL_PROFILE=edc693c6fccd68d266622eace04225421e353d7ce31e3b207afc5ff35124127b
     shm_size: 16gb
     deploy:
       resources:
