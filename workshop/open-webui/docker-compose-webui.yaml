@@ -35,6 +35,14 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
     restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['${EMBEDDING_MS_GPU_ID:-0}']
+              capabilities: [gpu]
+                  
   nemollm-embedding:
     image: harbor.pse.lab/paif-n/nv-embedqa-e5-v5-pb24h2:1.2.0
     volumes:
