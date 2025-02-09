@@ -1,0 +1,17 @@
+model_list:
+  - model_name: llama3-1-8b-instruct
+    litellm_params:
+      model: openai/meta/llama-3.1-8b-instruct
+      api_base: http://192.168.134.101:8000/v1
+      api_key: "nokey"
+  - model_name: nv-embed
+    litellm_params:
+      model: nvidia_nim/nvidia/nv-embedqa-e5-v5
+      api_base: http://192.168.134.102:8000/v1
+      api_key: "nokey"
+      input_type: "passage"
+  - model_name: llama3-2-11b-vision
+    litellm_params:
+      model: openai/meta/llama-3.2-11b-vision-instruct
+      api_base: http://192.168.71.11:8000/v1
+      api_key: "nokey"
