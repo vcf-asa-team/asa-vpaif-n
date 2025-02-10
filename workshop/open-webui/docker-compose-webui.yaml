@@ -46,36 +46,6 @@ services:
             - driver: nvidia
               device_ids: ['${EMBEDDING_MS_GPU_ID:-0}']
               capabilities: [gpu]
-                  
-  nemollm-embedding:
-    image: harbor.pse.lab/paif-n/nv-embedqa-e5-v5-pb24h2:1.2.0
-    volumes:
-      - /opt/data/nv-embedqa-e5-v5:/opt/nim/.cache
-    ports:
-      - "8000:8000"
-    expose:
-      - "8000"
-    environment:
-      - NGC_API_KEY=${NGC_API_KE}
-      - HF_HOME=/opt/nim/.cache/huggingface
-      - NUMBA_CACHE_DIR=/opt/nim/.cache/numba
-      # - NIM_MODEL_PROFILE=edc693c6fccd68d266622eace04225421e353d7ce31e3b207afc5ff35124127b
-    shm_size: 16gb
-    env_file:
-      - .env
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              device_ids: ['${EMBEDDING_MS_GPU_ID:-0}']
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/v1/health/ready"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
-      start_period: 10m
 volumes:
   webui_data:
 networks:
