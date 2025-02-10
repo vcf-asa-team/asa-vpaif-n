@@ -1,5 +1,10 @@
 include:
-- path:
-  - docker-compose-llm.yaml
-  - docker-compose-embed.yaml
-  - docker-compose-webui.yaml
+  - path:
+    - docker-compose-llm.yaml
+    - docker-compose-embed.yaml
+    - docker-compose-webui.yaml
+  - path: ../litellm/docker-compose.yml
+    env_file: ../litellm/.env
+networks:
+  default:
+    name: nvidia-rag
