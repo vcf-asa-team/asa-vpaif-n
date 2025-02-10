@@ -4,9 +4,9 @@ services:
     volumes:
       - /opt/data/nv-embedqa-e5-v5:/opt/nim/.cache
     ports:
-      - "8000:8000"
+      - "8001:8000"
     expose:
-      - "8000"
+      - "8001"
     environment:
       - NGC_API_KEY=${NGC_API_KEY}
       - HF_HOME=/opt/nim/.cache/huggingface
