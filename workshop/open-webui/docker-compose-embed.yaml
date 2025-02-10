@@ -32,4 +32,4 @@ volumes:
   embed_data:
 networks:
   default:
-    name: open-webui
+    name: nvidia-rag

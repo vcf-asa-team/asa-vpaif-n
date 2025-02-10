@@ -80,4 +80,4 @@ volumes:
   webui_data:
 networks:
   default:
-    name: open-webui
+    name: nvidia-rag

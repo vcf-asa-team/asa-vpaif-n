@@ -1,0 +1,5 @@
+include:
+- path:
+  - docker-compose-llm.yaml
+  - docker-compose-embed.yaml
+  - docker-compose-webui.yaml
