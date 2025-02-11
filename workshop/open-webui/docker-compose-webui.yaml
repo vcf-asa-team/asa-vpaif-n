@@ -1,6 +1,5 @@
 services:
   open-webui:
-    # image: ghcr.io/open-webui/open-webui:main
     container_name: open-webui
     build:
         context: .
@@ -15,7 +14,7 @@ services:
       - ENABLE_OLLAMA_API=False
       - WEBUI_NAME=${APP_NAME}
       - OPENAI_API_BASE_URL=${OPENAI_API_BASE_URL}
-      - OPENAI_API_KEY=nokey
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - WEBUI_SECRET_KEY=Sup3rS3cr3t!
       - OPEN_WEBUI_PORT=${OPEN_WEBUI_PORT}
       - ENABLE_SIGNUP=${ENABLE_SIGNUP}

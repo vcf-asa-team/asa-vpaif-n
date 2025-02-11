@@ -1,6 +1,6 @@
 services:
   nemollm-embedding:
-    image: ${EMBED_IMAGE} # harbor.pse.lab/paif-n/nv-embedqa-e5-v5-pb24h2:1.2.0
+    image: ${EMBED_IMAGE}
     volumes:
       - /opt/data/nv-embedqa-e5-v5:/opt/nim/.cache
     ports:

@@ -1,7 +1,7 @@
 services:
   nemollm-inference:
     container_name: inference-ms
-    image: ${LLM_IMAGE} # harbor.pse.lab/paif-n/llama-3.1-8b-instruct-pb24h2:1.3.1
+    image: ${LLM_IMAGE}
     volumes:
     - ${MODEL_DIRECTORY}:/opt/nim/.cache
     ports:
@@ -10,8 +10,7 @@ services:
     - '8000'
     environment:
       NGC_API_KEY: ${NGC_API_KEY}
-      NIM_MANIFEST_ALLOW_UNSAFE: '1'
-      NIM_MODEL_PROFILE: ${NIM_MODEL_PROFILE} #193649a2eb95e821309d6023a2cabb31489d3b690a9973c7ab5d1ff58b0aa7eb
+      NIM_MODEL_PROFILE: ${NIM_MODEL_PROFILE}
     shm_size: 20gb
     env_file:
       - .env
