@@ -6,7 +6,7 @@ services:
     ports:
       - "8001:8000"
     expose:
-      - "8001"
+      - "8000"
     environment:
       - NGC_API_KEY=${NGC_API_KEY}
       - HF_HOME=/opt/nim/.cache/huggingface
