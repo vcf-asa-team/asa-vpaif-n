@@ -11,7 +11,7 @@ services:
       - NGC_API_KEY=${NGC_API_KEY}
       - HF_HOME=/opt/nim/.cache/huggingface
       - NUMBA_CACHE_DIR=/opt/nim/.cache/numba
-      - NIM_MODEL_PROFILE=edc693c6fccd68d266622eace04225421e353d7ce31e3b207afc5ff35124127b
+      - NIM_MODEL_PROFILE=ea95501d4e68ce0adf88f962526d1fbac0fa64032495b6f6a421b2c37b62433f 
     shm_size: 16gb
     env_file:
       - .env
