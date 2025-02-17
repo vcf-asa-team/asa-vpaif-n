@@ -3,7 +3,7 @@ services:
     container_name: inference-ms
     image: ${LLM_IMAGE}
     volumes:
-    - ${MODEL_DIRECTORY}:/opt/nim/.cache
+    - ${MODEL_DIRECTORY}:/opt/nim/llm/.cache
     ports:
     - 8000:8000
     expose:
