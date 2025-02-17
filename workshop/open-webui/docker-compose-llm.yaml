@@ -3,7 +3,7 @@ services:
     container_name: inference-ms
     image: ${LLM_IMAGE}
     volumes:
-    - ${MODEL_DIRECTORY}:/opt/nim/llm/.cache
+    - ${MODEL_DIRECTORY}:/opt/nim/.cache
     ports:
     - 8000:8000
     expose:
@@ -11,6 +11,8 @@ services:
     environment:
       NGC_API_KEY: ${NGC_API_KEY}
       NIM_MODEL_PROFILE: ${NIM_MODEL_PROFILE}
+      HF_HOME: /opt/nim/.cache/huggingface
+      NUMBA_CACHE_DIR: /opt/nim/.cache/numba
     shm_size: 20gb
     env_file:
       - .env
