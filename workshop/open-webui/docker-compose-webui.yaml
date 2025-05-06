@@ -1,9 +1,10 @@
 services:
   open-webui:
     container_name: open-webui
-    build:
-        context: .
-        dockerfile: Dockerfile
+    # build:
+    #     context: .
+    #     dockerfile: Dockerfile
+    image: ${OWUI_IMAGE}
     volumes:
       - /opt/data/open-webui:/app/backend/data
       - /opt/data/docs:/data/docs
