@@ -6,7 +6,7 @@ services:
       - /opt/data/open-webui:/app/backend/data
       - /opt/data/docs:/data/docs
     ports:
-      - ${OPEN_WEBUI_PORT-3000}
+      - ${OPEN_WEBUI_PORT-3000}:8080
     environment:
       - WEBUI_AUTH=False
       - ENABLE_OLLAMA_API=False
