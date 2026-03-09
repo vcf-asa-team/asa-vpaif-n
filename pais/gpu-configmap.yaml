@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-operator-chart-values
+data:
+  values.yaml: |
+    operator:
+      logging:
+        level: debug
+    driver:                                  
+     image: vgpu-guest-driver-6              
+     version: "570.158.01"

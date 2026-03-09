@@ -1,0 +1,63 @@
+# Configure Private AI Service for a namespace.
+# It depends on several other resources.
+apiVersion: pais.vmware.com/v1alpha1
+kind: PAISConfiguration
+metadata:
+  name: default
+  # Remove the comments in the annotations section
+  # to use an FQDN instead of your LoadBalancer external IP address when switching 
+  # between the components of the Private AI Services UI
+  # annotations: 
+    # paisconfigurations.pais.vmware.com/cname=load_balancer_external_fqdn
+
+spec:
+  worker:
+    storageClassName: vsan-default-storage-policy
+  clientTls:
+    caBundleRefs:
+    - name: ca-trust-bundle-for-harbor
+    - name: ca-trust-bundle-for-dsm
+    - name: ca-trust-bundle-for-oidc
+  database:
+    host: 172.23.0.153
+    username: pgadmin
+    dbname: pais-db
+    passwordRef:
+      name: postgres-credentials
+      fieldPath: password
+  auth:
+    oidc:
+      issuerUrl: https://<fqdn-oidc>/application/o/pais/
+      clientId: "tAeFuRWLmt2f3E0PEaDgclxPHOOFoydvwbF4m4vn"
+      scope:
+      - openid
+      - groups
+      - profile
+      - email
+      # Many OIDC servers require the "offline_access" scope for issuing
+      # refresh tokens (which is a requirement
+      # for the Private AI Services) UI, but
+      # not all servers support this scope.
+      # check with your OIDC server documentation
+      # if this scope is supported and required
+      - offline_access
+      authorizedGroups: []
+      # - group-for-pais-access
+  ingress:
+    serviceType: LoadBalancer
+  vksControlPlane:
+    virtualMachineClassName: best-effort-large
+    storageClassName: vsan-default-storage-policy
+  nvidiaConfig:
+    licenseConfigRef:
+      name: licensing-config
+    imagePullSecretRef:
+      name: ngc-secret
+    gpuOperatorOverridesRef:
+      name: gpu-operator-chart-values # Config map to nvidia gpu-operator helm chart overrides
+  runtimeConfig:
+    indexingWorkersRuntimeConfig:
+      deployment:
+        replicas: 1
+      workerRateLimit: 100/s
+      workerThreads: 10
