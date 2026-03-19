@@ -28,7 +28,7 @@ spec:
   auth:
     oidc:
       issuerUrl: https://<fqdn-oidc>/application/o/pais/
-      clientId: "tAeFuRWLmt2f3E0PEaDgclxPHOOFoydvwbF4m4vn"
+      clientId: "<oidc-client-id>"
       scope:
       - openid
       - groups

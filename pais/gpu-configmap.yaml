@@ -7,6 +7,14 @@ data:
     operator:
       logging:
         level: debug
-    driver:                                  
-     image: vgpu-guest-driver-6              
-     version: "570.158.01"
+    driver:
+      # If the version of the host vGPU driver is 580.x,
+      # use "image: vgpu-guest-driver-7"
+      # If the version of the host vGPU driver is 570.x,
+      # use "image: vgpu-guest-driver-6"
+      # If the version of the host vGPU driver is 550.x,
+      # use "image: vgpu-guest-driver-5"
+      # If the version of the host vGPU driver is 535.x,
+      # use "image: vgpu-guest-driver-4"  
+      image: vgpu-guest-driver-6              
+      version: "570.158.01"
