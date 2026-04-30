@@ -8,7 +8,7 @@ metadata:
   # to use an FQDN instead of your LoadBalancer external IP address when switching 
   # between the components of the Private AI Services UI
   # annotations: 
-    # paisconfigurations.pais.vmware.com/cname=load_balancer_external_fqdn
+    # paisconfigurations.pais.vmware.com/cname: load_balancer_external_fqdn
 
 spec:
   worker:
