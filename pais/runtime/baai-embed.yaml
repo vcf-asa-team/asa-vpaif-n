@@ -1,0 +1,21 @@
+# Last updated on Mon Mar 23 2026 15:17:03 GMT-0500 (Central Daylight Time)
+apiVersion: pais.vmware.com/v1alpha1
+kind: ModelEndpoint
+metadata:
+  annotations:
+    pais.vmware.com/displayName: baai/bge-small-en-v1.5
+  name: baai-bge-small-en-v1.5
+spec:
+  engine: Infinity
+  inferenceServerCustomization:
+    engineImageCompressedSize: 15Gi
+    sharedMemoryMountSize: 64Mi
+    tempMountSize: 1Gi
+  model:
+    ociRef: harbor.eq.lab/model-store/baai/bge-small-en-v1.5:v1
+  overrides: ''
+  replicas: 1
+  routingName: baai/bge-small-en-v1.5
+  storageClassName: vsan-default-storage-policy
+  type: Embeddings
+  virtualMachineClassName: gpu-l40s-8c-small

@@ -7,8 +7,8 @@ metadata:
   # Remove the comments in the annotations section
   # to use an FQDN instead of your LoadBalancer external IP address when switching 
   # between the components of the Private AI Services UI
-  # annotations: 
-    # paisconfigurations.pais.vmware.com/cname: load_balancer_external_fqdn
+  annotations: 
+    paisconfigurations.pais.vmware.com/cname: "pais.eq.lab"
 
 spec:
   worker:
@@ -27,8 +27,10 @@ spec:
       fieldPath: password
   auth:
     oidc:
-      issuerUrl: https://<fqdn-oidc>/application/o/pais/
-      clientId: "<oidc-client-id>"
+      issuerUrl: https://authentik.pse.lab/application/o/pais-demo/
+      clientId: "GknoZ2BvehvyX9K33uA0Jk04JKl7Dx3itK2Rsh2A"
+      # issuerUrl: https://172.23.0.49/
+      # clientId: DO_NOT_USE
       scope:
       - openid
       - groups
@@ -41,8 +43,8 @@ spec:
       # check with your OIDC server documentation
       # if this scope is supported and required
       - offline_access
-      authorizedGroups: []
-      # - group-for-pais-access
+      authorizedGroups:
+      - pais-group
   ingress:
     serviceType: LoadBalancer
   vksControlPlane:

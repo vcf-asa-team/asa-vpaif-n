@@ -1,0 +1,39 @@
+apiVersion: pais.vmware.com/v1alpha1
+kind: ModelEndpoint
+spec:
+  model:
+    ociRef: harbor.eq.lab/model-store/google/gemma-4-26b-a4b-it-awq-8bit:v1
+  routingName: google/gemma4-26b-it
+  type: Completions
+  engine: vLLM
+  inferenceServerCustomization:
+    cliArgs:
+      - '--tensor-parallel-size=1'
+      - '--disable-custom-all-reduce'
+      - '--gpu-memory-utilization=0.80'
+      - '--tokenizer-mode=slow'
+      # - '--kv-cache-dtype=turboquant_k8v4'
+      # - '--additional-config={"turboquant": true, "k_quant": "q4_0", "v_quant": "q3_0"}'
+      # - '--attention-backend=FLASH_ATTN'
+      - '--trust-remote-code'
+      - '--reasoning-parser=gemma4'
+      - '--tool-call-parser=gemma4'
+      - '--enable-auto-tool-choice'
+      - '--max-num-batched-tokens=4096'
+      - '--max-model-len=16384'
+    envVars:
+      - name: NCCL_DEBUG
+        value: INFO
+      - name: TRANSFORMERS_VERBOSITY
+        value: info
+      - name: VLLM_LOGGING_LEVEL
+        value: INFO
+      - name: VLLM_USE_V1
+        value: "0"
+    engineImage: harbor.eq.lab/vllm/vllm-openai:gemma4
+  virtualMachineClassName: gpu-l40s-48c-large
+  storageClassName: vsan-default-storage-policy
+metadata:
+  name: gemma-4-26b-it
+  annotations:
+    pais.vmware.com/displayName: google/gemma4-26b-it

@@ -6,7 +6,7 @@ data:
   values.yaml: |
     operator:
       logging:
-        level: debug
+        level: info
     driver:
       # If the version of the host vGPU driver is 580.x,
       # use "image: vgpu-guest-driver-7"
@@ -15,6 +15,7 @@ data:
       # If the version of the host vGPU driver is 550.x,
       # use "image: vgpu-guest-driver-5"
       # If the version of the host vGPU driver is 535.x,
-      # use "image: vgpu-guest-driver-4"  
-      image: vgpu-guest-driver-6              
-      version: "570.158.01"
+      # use "image: vgpu-guest-driver-4"                             
+      image: vgpu-guest-driver-7             
+      version: "580.158.01"
+

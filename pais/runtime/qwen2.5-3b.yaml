@@ -1,0 +1,32 @@
+apiVersion: pais.vmware.com/v1alpha1
+kind: ModelEndpoint
+metadata:
+  annotations:
+  name: qwen2.5-3b-instruct
+spec:
+  engine: vLLM
+  inferenceServerCustomization:
+    cliArgs:
+      - '--tensor-parallel-size=1'
+      - '--gpu-memory-utilization=0.8'
+      - '--max-model-len=4096'
+      - '--max-num-seqs=8'
+      - '--enforce-eager'
+      - '--disable-custom-all-reduce'
+      - '--tool-call-parser=hermes'
+      - '--enable-auto-tool-choice'
+    engineImageCompressedSize: 20Gi
+    sharedMemoryMountSize: 64Mi
+    tempMountSize: 1Gi
+  model:
+    ociRef: harbor.eq.lab/model-store/qwen/qwen2.5-3b-instruct:v1
+  overrides: ''
+  podResourceOverrides:
+    nvidia.com/gpu: '1'
+  replicas: 1
+  routingName: qwen/qwen2.5-3b-instruct
+  storageClassName: vsan-default-storage-policy
+  type: Completions
+  virtualMachineClassName: gpu-l40s-8c-small 
+
+
