@@ -5,9 +5,8 @@ services:
     volumes:
       - /opt/data/open-webui:/app/backend/data
       - /opt/data/docs:/data/docs
-    ports:
-      - ${OPEN_WEBUI_PORT-3000}:8080
     environment:
+      - WEBUI_AUTH=False
       - ENABLE_OLLAMA_API=False
       - WEBUI_SECRET_KEY=Sup3rS3cr3t!
     extra_hosts:
@@ -15,5 +14,15 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+  reverse-proxy:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+    volumes:
+      - /opt/data/open-webui/certs/cert.crt:/etc/nginx/ssl/cert.crt
+      - /opt/data/open-webui/certs/cert.key:/etc/nginx/ssl/cert.key
+      - /opt/data/open-webuiß/nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+    - open-webui
 volumes:
   webui_data:
