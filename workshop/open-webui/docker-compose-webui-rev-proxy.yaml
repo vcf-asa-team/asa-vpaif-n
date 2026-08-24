@@ -6,9 +6,7 @@ services:
       - /opt/data/open-webui:/app/backend/data
       - /opt/data/docs:/data/docs
     environment:
-      - WEBUI_AUTH=False
       - ENABLE_OLLAMA_API=False
-      - WEBUI_SECRET_KEY=Sup3rS3cr3t!
     extra_hosts:
       - host.docker.internal:host-gateway
     restart: unless-stopped
