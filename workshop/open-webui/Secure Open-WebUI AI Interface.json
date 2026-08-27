@@ -1,0 +1,511 @@
+{
+  "layout": {
+    "pages": [
+      {
+        "id": "page_dlvm",
+        "sections": [
+          {
+            "id": "section_dlvm",
+            "fields": [
+              {
+                "id": "namespaceName",
+                "display": "textField",
+                "state": {
+                  "visible": true,
+                  "read-only": false
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          },
+          {
+            "id": "section_87a13c3e",
+            "fields": [
+              {
+                "id": "vmClassName",
+                "display": "dropDown",
+                "state": {
+                  "visible": true,
+                  "read-only": false
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          },
+          {
+            "id": "section_0bf7617d",
+            "fields": [
+              {
+                "id": "dataStorageSize",
+                "display": "dropDown",
+                "state": {
+                  "visible": true,
+                  "read-only": false
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          },
+          {
+            "id": "section_3c50346d",
+            "fields": [
+              {
+                "id": "password",
+                "display": "passwordField",
+                "state": {
+                  "visible": true,
+                  "read-only": false
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          },
+          {
+            "id": "section_0dc7c284",
+            "fields": [
+              {
+                "id": "sshPublicKeys",
+                "display": "textField",
+                "state": {
+                  "visible": true,
+                  "read-only": false
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          }
+        ],
+        "title": "Deep Learning VM Configuration"
+      },
+      {
+        "id": "page_openwebui",
+        "sections": [
+          {
+            "id": "section_openwebui",
+            "fields": [
+              {
+                "id": "appName",
+                "display": "textField",
+                "state": {
+                  "visible": true,
+                  "read-only": false
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          },
+          {
+            "id": "section_5fa8343d",
+            "fields": [
+              {
+                "id": "llmGateway",
+                "display": "textField",
+                "state": {
+                  "visible": true,
+                  "read-only": false
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          }
+        ],
+        "title": "Open-Webui Configuration"
+      },
+      {
+        "id": "page_database",
+        "sections": [
+          {
+            "id": "section_database",
+            "fields": [
+              {
+                "id": "owuiDBName",
+                "display": "textField",
+                "state": {
+                  "visible": true,
+                  "read-only": false
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          },
+          {
+            "id": "section_c5f192cc",
+            "fields": [
+              {
+                "id": "databaseStorageSize",
+                "display": "dropDown",
+                "state": {
+                  "visible": true,
+                  "read-only": false
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          },
+          {
+            "id": "section_406e4752",
+            "fields": [
+              {
+                "id": "databaseStoragePolicy",
+                "display": "dropDown",
+                "state": {
+                  "visible": true,
+                  "read-only": false
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          },
+          {
+            "id": "section_25f51508",
+            "fields": [
+              {
+                "id": "databaseVmClass",
+                "display": "dropDown",
+                "state": {
+                  "visible": true,
+                  "read-only": false
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          }
+        ],
+        "title": "Database Configuration"
+      },
+      {
+        "id": "page_oidc",
+        "sections": [
+          {
+            "id": "section_oidc",
+            "fields": [
+              {
+                "id": "enableOIDC",
+                "display": "checkbox",
+                "state": {
+                  "visible": true,
+                  "read-only": false
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          },
+          {
+            "id": "section_7f0774ad",
+            "fields": [
+              {
+                "id": "oidcProviderUrl",
+                "display": "textField",
+                "state": {
+                  "read-only": false,
+                  "visible": [
+                    {
+                      "equals": {
+                        "enableOIDC": true
+                      },
+                      "value": true
+                    }
+                  ]
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          },
+          {
+            "id": "section_cc991bec",
+            "fields": [
+              {
+                "id": "oidcClientId",
+                "display": "textField",
+                "state": {
+                  "read-only": false,
+                  "visible": [
+                    {
+                      "equals": {
+                        "enableOIDC": true
+                      },
+                      "value": true
+                    }
+                  ]
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          },
+          {
+            "id": "section_b718b0c2",
+            "fields": [
+              {
+                "id": "oidcClientSecret",
+                "display": "passwordField",
+                "state": {
+                  "read-only": false,
+                  "visible": [
+                    {
+                      "equals": {
+                        "enableOIDC": true
+                      },
+                      "value": true
+                    }
+                  ]
+                },
+                "signpostPosition": "right-middle"
+              }
+            ]
+          }
+        ],
+        "title": "OIDC Configuration",
+        "state": {}
+      }
+    ]
+  },
+  "schema": {
+    "namespaceName": {
+      "label": "Namespace",
+      "description": "Existing VCF Automation Supervisor namespace to deploy into. Populate this as a live dropdown by attaching a Service Broker Custom Form bound to an external data source that lists the tenant's namespaces.",
+      "signpost": "Existing VCF Automation Supervisor namespace to deploy into. Populate this as a live dropdown by attaching a Service Broker Custom Form bound to an external data source that lists the tenant's namespaces.",
+      "type": {
+        "dataType": "string",
+        "isMultiple": false
+      },
+      "default": "ai-workshop2-g5pxh",
+      "valueList": [
+        {
+          "value": "ai-workshop2-g5pxh",
+          "label": "ai-workshop2-g5pxh"
+        }
+      ],
+      "constraints": {
+        "required": true
+      }
+    },
+    "vmClassName": {
+      "label": "VM class",
+      "description": "Virtual Machine Class Name",
+      "signpost": "Virtual Machine Class Name",
+      "type": {
+        "dataType": "string",
+        "isMultiple": false
+      },
+      "default": "best-effort-large",
+      "valueList": [
+        {
+          "value": "best-effort-small",
+          "label": "best-effort-small"
+        },
+        {
+          "value": "best-effort-medium",
+          "label": "best-effort-medium"
+        },
+        {
+          "value": "best-effort-large",
+          "label": "best-effort-large"
+        }
+      ]
+    },
+    "dataStorageSize": {
+      "label": "Data disk size",
+      "description": "Additional data disk mounted at \"/opt/data\"",
+      "signpost": "Additional data disk mounted at \"/opt/data\"",
+      "type": {
+        "dataType": "string",
+        "isMultiple": false
+      },
+      "default": "32Gi",
+      "valueList": [
+        {
+          "value": "32Gi",
+          "label": "32Gi"
+        },
+        {
+          "value": "64Gi",
+          "label": "64Gi"
+        },
+        {
+          "value": "128Gi",
+          "label": "128Gi"
+        },
+        {
+          "value": "256Gi",
+          "label": "256Gi"
+        },
+        {
+          "value": "512Gi",
+          "label": "512Gi"
+        }
+      ]
+    },
+    "password": {
+      "label": "User password",
+      "description": "Password for user \"vmware\"",
+      "signpost": "Password for user \"vmware\"",
+      "type": {
+        "dataType": "secureString",
+        "isMultiple": false
+      },
+      "constraints": {
+        "required": true
+      }
+    },
+    "sshPublicKeys": {
+      "label": "SSH public keys",
+      "description": "The content of the user public key (for example, ~/.ssh/id_rsa.pub)",
+      "signpost": "The content of the user public key (for example, ~/.ssh/id_rsa.pub)",
+      "type": {
+        "dataType": "string",
+        "isMultiple": false
+      },
+      "default": "sshKey"
+    },
+    "appName": {
+      "label": "Application Name",
+      "description": "Name of the application being deployed",
+      "signpost": "Name of the application being deployed",
+      "type": {
+        "dataType": "string",
+        "isMultiple": false
+      },
+      "constraints": {
+        "required": true
+      }
+    },
+    "llmGateway": {
+      "label": "API Gateway",
+      "description": "FQDN or IP of LLM or API Gateway",
+      "signpost": "FQDN or IP of LLM or API Gateway",
+      "type": {
+        "dataType": "string",
+        "isMultiple": false
+      },
+      "default": "r169-env4-pais-api.pse.lab"
+    },
+    "owuiDBName": {
+      "label": "OpenWebui DB Name",
+      "type": {
+        "dataType": "string",
+        "isMultiple": false
+      },
+      "default": "openwebui"
+    },
+    "databaseStoragePolicy": {
+      "label": "Select a storage policy",
+      "description": "Select the storage policy to apply to DSMDB created using the catalog item",
+      "signpost": "Select the storage policy to apply to DSMDB created using the catalog item",
+      "type": {
+        "dataType": "string",
+        "isMultiple": false
+      },
+      "default": "vSAN Default Storage Policy",
+      "valueList": [
+        {
+          "value": "vSAN Default Storage Policy",
+          "label": "vSAN Default Storage Policy"
+        }
+      ]
+    },
+    "databaseVmClass": {
+      "label": "Select a VM class",
+      "description": "Select the VM class to apply to DSMDB created using the catalog item",
+      "signpost": "Select the VM class to apply to DSMDB created using the catalog item",
+      "type": {
+        "dataType": "string",
+        "isMultiple": false
+      },
+      "default": "small",
+      "valueList": [
+        {
+          "value": "large",
+          "label": "large"
+        },
+        {
+          "value": "medium",
+          "label": "medium"
+        },
+        {
+          "value": "small",
+          "label": "small"
+        }
+      ]
+    },
+    "databaseStorageSize": {
+      "label": "Database Disk Size",
+      "description": "DSM Database Disk Size",
+      "signpost": "DSM Database Disk Size",
+      "type": {
+        "dataType": "string",
+        "isMultiple": false
+      },
+      "default": "64Gi",
+      "valueList": [
+        {
+          "value": "64Gi",
+          "label": "64Gi"
+        },
+        {
+          "value": "128Gi",
+          "label": "128Gi"
+        },
+        {
+          "value": "256Gi",
+          "label": "256Gi"
+        },
+        {
+          "value": "512Gi",
+          "label": "512Gi"
+        },
+        {
+          "value": "1024Gi",
+          "label": "1024Gi"
+        }
+      ]
+    },
+    "enableOIDC": {
+      "label": "Enable OIDC with vIDM",
+      "description": "Enable single sign-on to Open-Webui via VMware Identity Manager / Workspace ONE Access (OIDC)",
+      "signpost": "Enable single sign-on to Open-Webui via VMware Identity Manager / Workspace ONE Access (OIDC)",
+      "type": {
+        "dataType": "boolean",
+        "isMultiple": false
+      },
+      "default": false
+    },
+    "oidcProviderUrl": {
+      "label": "vIDM OIDC discovery URL",
+      "description": "vIDM / Workspace ONE Access OpenID discovery URL, e.g. https://<vidm-fqdn>/SAAS/auth/.well-known/openid-configuration",
+      "signpost": "vIDM / Workspace ONE Access OpenID discovery URL, e.g. https://<vidm-fqdn>/SAAS/auth/.well-known/openid-configuration",
+      "type": {
+        "dataType": "string",
+        "isMultiple": false
+      },
+      "default": "",
+      "constraints": {
+        "required": false
+      }
+    },
+    "oidcClientId": {
+      "label": "vIDM OAuth client ID",
+      "type": {
+        "dataType": "string",
+        "isMultiple": false
+      },
+      "default": "",
+      "constraints": {
+        "required": false
+      }
+    },
+    "oidcClientSecret": {
+      "label": "vIDM OAuth client secret",
+      "type": {
+        "dataType": "secureString",
+        "isMultiple": false
+      },
+      "default": "",
+      "constraints": {
+        "required": false
+      }
+    }
+  },
+  "options": {
+    "externalValidations": []
+  }
+}

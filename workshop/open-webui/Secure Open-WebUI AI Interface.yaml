@@ -1,0 +1,702 @@
+formatVersion: 2
+metadata:
+  deploymentSettings:
+    disableUpdateDay2Action: true
+    hideDisabledDay2Actions: true
+inputs:
+  # --- Deep Learning VM configuration ---
+  namespaceName:
+    type: string
+    title: Namespace
+    description: Existing VCF Automation Supervisor namespace to deploy into. Populate this as a live dropdown by attaching a Service Broker Custom Form bound to an external data source that lists the tenant's namespaces.
+    default: ai-workshop2-g5pxh
+    oneOf:
+      - title: ai-workshop2-g5pxh
+        const: ai-workshop2-g5pxh
+  vmClassName:
+    type: string
+    title: VM class
+    description: Virtual Machine Class Name
+    default: best-effort-large
+    oneOf:
+      - title: best-effort-small
+        const: best-effort-small
+      - title: best-effort-medium
+        const: best-effort-medium
+      - title: best-effort-large
+        const: best-effort-large
+  dataStorageSize:
+    type: string
+    title: Data disk size
+    description: Additional data disk mounted at "/opt/data"
+    default: 32Gi
+    oneOf:
+      - title: 32Gi
+        const: 32Gi
+      - title: 64Gi
+        const: 64Gi
+      - title: 128Gi
+        const: 128Gi
+      - title: 256Gi
+        const: 256Gi
+      - title: 512Gi
+        const: 512Gi
+  password:
+    type: string
+    title: User password
+    description: Password for user "vmware"
+    encrypted: true
+    writeOnly: true
+  sshPublicKeys:
+    type: string
+    description: The content of the user public key (for example, ~/.ssh/id_rsa.pub)
+    title: SSH public keys
+    default: sshKey
+  # --- Open-Webui configuration ---
+  appName:
+    type: string
+    title: Application Name
+    description: Name of the application being deployed
+  llmGateway:
+    type: string
+    title: API Gateway
+    description: FQDN or IP of LLM or API Gateway
+    default: r169-env4-pais-api.pse.lab
+  # --- Database configuration ---
+  owuiDBName:
+    type: string
+    title: OpenWebui DB Name
+    default: openwebui
+  databaseStoragePolicy:
+    type: string
+    title: Select a storage policy
+    description: Select the storage policy to apply to DSMDB created using the catalog item
+    default: vSAN Default Storage Policy
+    oneOf:
+      - title: vSAN Default Storage Policy
+        const: vSAN Default Storage Policy
+  databaseVmClass:
+    type: string
+    title: Select a VM class
+    description: Select the VM class to apply to DSMDB created using the catalog item
+    default: large
+    oneOf:
+      - title: large
+        const: large
+      - title: medium
+        const: medium
+      - title: small
+        const: small
+  databaseStorageSize:
+    type: string
+    title: Database Disk Size
+    description: DSM Database Disk Size
+    default: 64Gi
+    oneOf:
+      - title: 64Gi
+        const: 64Gi
+      - title: 128Gi
+        const: 128Gi
+      - title: 256Gi
+        const: 256Gi
+      - title: 512Gi
+        const: 512Gi
+      - title: 1024Gi
+        const: 1024Gi
+  # --- OIDC configuration ---
+  enableOIDC:
+    type: boolean
+    title: Enable OIDC with vIDM
+    description: Enable single sign-on to Open-Webui via VMware Identity Manager / Workspace ONE Access (OIDC)
+    default: false
+  oidcProviderUrl:
+    type: string
+    title: vIDM OIDC discovery URL
+    description: vIDM / Workspace ONE Access OpenID discovery URL, e.g. https://<vidm-fqdn>/SAAS/auth/.well-known/openid-configuration
+    default: ''
+  oidcClientId:
+    type: string
+    title: vIDM OAuth client ID
+    default: ''
+  oidcClientSecret:
+    type: string
+    title: vIDM OAuth client secret
+    encrypted: true
+    writeOnly: true
+    default: ''
+variables:
+  applications:
+    - name: Open-Webui
+      port: 443
+      url: https://$HOST:$PORT/
+  services:
+    - name: SSH
+      port: 22
+      exposeToAll: true
+  exposedPorts: ${map_by(filter_by(variable.services, svc => svc.exposeToAll), svc => svc.port) + map_by(variable.applications, app => app.port)}
+  httpProxy: ''
+  httpsProxy: ''
+  noProxy: ''
+  enableProxyForNVIDIALicense: false
+  softwareCloudInit:
+    ssh_pwauth: true
+    chpasswd:
+      expire: false
+    fs_setup:
+      - label: data
+        filesystem: ext4
+        device: /dev/sdb
+    mounts:
+      - - /dev/sdb
+        - /opt/data
+        - auto
+        - defaults,nofail
+        - '0'
+        - '0'
+    write_files:
+      - encoding: b64
+        path: /opt/dlvm/get-vgpu-driver.sh
+        owner: root:root
+        permissions: '0755'
+        content: IyEvYmluL2Jhc2gKCiMgQ29weXJpZ2h0IChjKSAyMDI0IEJyb2FkY29tLiBBbGwgUmlnaHRzIFJlc2VydmVkLgojIEJyb2FkY29tIENvbmZpZGVudGlhbC4gVGhlIHRlcm0gIkJyb2FkY29tIiByZWZlcnMgdG8gQnJvYWRjb20gSW5jLgojIGFuZC9vciBpdHMgc3Vic2lkaWFyaWVzLgoKIyBydW4gdGhpcyBzY3JpcHQgd2l0aCByb290CgpkbF9hcHA9Ii9vcHQvZGx2bS9kbF9hcHAuc2giCmRsX2FwcF91c2VyPSJ2bXdhcmUiCgpETFZNX1JFTEVBU0VfRklMRT0iL2V0Yy9kbHZtLXJlbGVhc2UiCmlmIFtbIC1mICIkRExWTV9SRUxFQVNFX0ZJTEUiIF1dOyB0aGVuCiAgICBjYXQgIiRETFZNX1JFTEVBU0VfRklMRSIKZWxzZQogICAgZWNobyAiV2FybmluZzogJERMVk1fUkVMRUFTRV9GSUxFIGRvZXMgbm90IGV4aXN0LiIgPiYyCmZpCgojIFRPRE86IFJlZmFjdG9yIHRoZSByZW1haW5pbmcgcGFydHMgb2YgdGhlIEJhc2ggc2NyaXB0IGludG8gUHl0aG9uLgplcnJvcigpIHsgCiAgICBQWVRIT05QQVRIPSRQWVRIT05QQVRIOi9vcHQvZGx2bS8gcHl0aG9uMyAvb3B0L2Rsdm0vZGx2bWluaXQvY2FsbF9lcnJvci5weSAiJEAiOwp9CgojIGNoZWNrIGlmIGRyaXZlciBoYXMgYmVlbiBpbnN0YWxsZWQKaWYgY29tbWFuZCAtdiBudmlkaWEtc21pICY+IC9kZXYvbnVsbDsgdGhlbgogICAgZWNobyAibnZpZGlhLXNtaSBpcyBpbnN0YWxsZWQuIFRyeSB0byBydW4gZGxfYXBwLnNoIgogICAgaWYgWyAtZiAiJGRsX2FwcCIgXTsgdGhlbgogICAgICAgIGNobW9kICt4ICRkbF9hcHAKICAgICAgICBzdWRvIC11ICIkZGxfYXBwX3VzZXIiIGJhc2ggLWMgIiRkbF9hcHAiID4+IC92YXIvbG9nL2RsLmxvZyAyPiYxCiAgICAgICAgaWYgWyAkPyAtZXEgMCBdOyB0aGVuCiAgICAgICAgICAgIGVjaG8gIkRMIGFwcHMgZXhlY3V0ZWQgc3VjY2Vzc2Z1bGx5IgogICAgICAgICAgICB2bXRvb2xzZCAtLWNtZCAiaW5mby1zZXQgZ3Vlc3RpbmZvLnZtc2VydmljZS5ib290c3RyYXAuY29uZGl0aW9uIHRydWUsU3VjY2VzcyIKICAgICAgICBlbHNlCiAgICAgICAgICAgIGVycm9yICJETCBhcHBzIGZhaWxlZCIKICAgICAgICBmaQogICAgZWxzZQogICAgICAgIGVjaG8gIk5vIERMIGFwcGxpY2F0aW9uIgogICAgICAgIHZtdG9vbHNkIC0tY21kICJpbmZvLXNldCBndWVzdGluZm8udm1zZXJ2aWNlLmJvb3RzdHJhcC5jb25kaXRpb24gdHJ1ZSxTdWNjZXNzIgogICAgZmkKICAgICMgQWRkIGNvZGUgdG8gcnVuIGVuYWJsZSBETCBWTSBjb25zb2xlIGV2ZW4gaWYgbnZpZGlhLXNtaSBpcyBpbnN0YWxsZWQKICAgIFBZVEhPTlBBVEg9JFBZVEhPTlBBVEg6L29wdC9kbHZtLyBweXRob24zIC9vcHQvZGx2bS9kbHZtaW5pdC9vdmZfcHJvY2Vzc29yLnB5IGRsdm1jb25zb2xlIC0teG1sX2ZpbGU9L29wdC9kbHZtL292Zi1lbnYueG1sCiAgICBleGl0IDAKZmkKCiMgZ2V0IGhvc3QgZHJpdmVyIHZlcnNpb24KYXNjaWk9JChsc3BjaSAtZCAxMGRlOiAtdnZ2IC14eHh8c2VkIC1uIC1lICcvXmQwXHxeZTAvcCd8Y3V0IC1kJyAnIC1mMi18c2VkICdOO3MvXG4vIC8nfGN1dCAtZCcgJyAtZiA4LTE3fHNlZCAncy9eLyAvJ3xoZWFkIC0xKQphc2NpaT0ke2FzY2lpLy8gL1xceH0KaG9zdF92ZXJzaW9uPSQocHJpbnRmICIkYXNjaWkiIHwgdHIgLWQgJ1wwJykKZWNobyAidkdQVSBob3N0IGRyaXZlciB2ZXJzaW9uIGRldGVjdGVkOiAkaG9zdF92ZXJzaW9uIgoKdmVyc2lvbl9wYXR0ZXJuPSdeWzAtOV0rKFwuWzAtOV0rKSokJwplY2hvICJWYWxpZGF0aW5nIHZHUFUgaG9zdCB2ZXJzaW9uIHVzaW5nIHBhdHRlcm46ICR2ZXJzaW9uX3BhdHRlcm4iCmlmIFtbICRob3N0X3ZlcnNpb24gPX4gJHZlcnNpb25fcGF0dGVybiBdXTsgdGhlbgogICAgZWNobyAiVGhlIHZHUFUgaG9zdCBkcml2ZXIgdmVyc2lvbiBtYXRjaGVzIHRoZSBwYXR0ZXJuLiIKZWxzZQogICAgZWNobyAiVGhlIHZHUFUgaG9zdCBkcml2ZXIgdmVyc2lvbiBkb2VzIE5PVCBtYXRjaCB0aGUgcGF0dGVybi4iCmZpCgojIGNvcHkgb3ZmIHBhcmFtZXRlcnMgdG8gL29wdC9kbHZtL292Zi1lbnYueG1sCmlzX292Zl9lbnZfZ2V0PTAKCiMgdHJ5IENELVJPTQppZiBbIC1MICIvZGV2L2Nkcm9tIiBdOyB0aGVuCiAgICBta2RpciAvbWVkaWEvb3ZmCiAgICBpZiBtb3VudCAtdCBpc285NjYwIC1vIHJvIC9kZXYvY2Ryb20gL21lZGlhL292ZjsgdGhlbgogICAgICAgaWYgY3AgLWYgL21lZGlhL292Zi9vdmYtZW52LnhtbCAvb3B0L2Rsdm07IHRoZW4KICAgICAgICAgICBpc19vdmZfZW52X2dldD0xCiAgICAgICBmaQogICAgICAgdW1vdW50IC9tZWRpYS9vdmYKICAgIGZpCiAgICBybSAtcmYgL21lZGlhL292ZgpmaQoKIyB0cnkgdm10b29sc2QKaWYgWyAiJGlzX292Zl9lbnZfZ2V0IiAtbmUgMSBdICYmICEgdm10b29sc2QgLS1jbWQgImluZm8tZ2V0IGd1ZXN0aW5mby5vdmZFbnYiID4gL29wdC9kbHZtL292Zi1lbnYueG1sOyB0aGVuCiAgICBlcnJvciAiQ291bGQgbm90IGdldCBPVkYgcGFyYW1ldGVyIgpmaQoKdmdwdV9saWNlbnNlPSQoZ3JlcCB2Z3B1LWxpY2Vuc2UgL29wdC9kbHZtL292Zi1lbnYueG1sIHwgc2VkIC1uICdzLy4qb2U6dmFsdWU9IlwoW14iXSpcKS4qL1wxL3AnKQoKY29uZmlnX2pzb249JChncmVwIGNvbmZpZy1qc29uIC9vcHQvZGx2bS9vdmYtZW52LnhtbCB8IHNlZCAtbiAncy8uKm9lOnZhbHVlPSJcKFteIl0qXCkuKi9cMS9wJykKZG9ja2VyX2NvbXBvc2VfdXJpPSQoZ3JlcCBkb2NrZXItY29tcG9zZS11cmkgL29wdC9kbHZtL292Zi1lbnYueG1sIHwgc2VkIC1uICdzLy4qb2U6dmFsdWU9IlwoW14iXSpcKS4qL1wxL3AnKQoKaW1hZ2Vfb25lbGluZXI9JChncmVwIGltYWdlLW9uZWxpbmVyIC9vcHQvZGx2bS9vdmYtZW52LnhtbCB8IHNlZCAtbiAncy8uKm9lOnZhbHVlPSJcKFteIl0qXCkuKi9cMS9wJykKCiMgbG9naW4gY29udGFpbmVyIHJlZ2lzdHJ5ClBZVEhPTlBBVEg9JFBZVEhPTlBBVEg6L29wdC9kbHZtLyBweXRob24zIC9vcHQvZGx2bS9kbHZtaW5pdC9vdmZfcHJvY2Vzc29yLnB5IGFsbCAtLXhtbF9maWxlPS9vcHQvZGx2bS9vdmYtZW52LnhtbCAtLWhvc3RfdmVyc2lvbj0iJHtob3N0X3ZlcnNpb259IgpzdGF0dXM9JD8KaWYgWyAkc3RhdHVzIC1uZSAwIF07IHRoZW4KICAgIGVjaG8gIkRyaXZlciBpbnN0YWxsYXRpb24gZmFpbGVkIgpmaQoKIyBjaGVjayBkcml2ZXIgaXMgaW5zdGFsbGVkIGNvcnJlY3RseQpudmlkaWEtc21pCgojIGluc3RhbGwgdmdwdV9saWNlbnNlCmlmIFtbIC1uICR2Z3B1X2xpY2Vuc2UgXV07IHRoZW4KICAgIGVjaG8gLW4gJHZncHVfbGljZW5zZSA+IC9ldGMvbnZpZGlhL0NsaWVudENvbmZpZ1Rva2VuL2NsaWVudF9jb25maWd1cmF0aW9uX3Rva2VuLnRvawogICAgY2htb2QgNzQ0IC9ldGMvbnZpZGlhL0NsaWVudENvbmZpZ1Rva2VuL2NsaWVudF9jb25maWd1cmF0aW9uX3Rva2VuLnRvawogICAgL2V0Yy9pbml0LmQvbnZpZGlhLWdyaWRkIHJlc3RhcnQKICAgIHNsZWVwIDIwCiAgICBudmlkaWEtc21pIC1xIHwgZ3JlcCAtaSAibGljZW5zZSBzdGF0dXMiIHwgc2VkICdzL15bIFx0XSovLycKICAgIGNhdCAvdmFyL2xvZy9zeXNsb2cgfCBncmVwIC1pIG52aWRpYQplbHNlCiAgICBlY2hvICJObyB2R1BVIGxpY2Vuc2UgaXMgcHJvdmlkZWQiCmZpCgppZiBbWyAtbiAkZG9ja2VyX2NvbXBvc2VfdXJpIF1dOyB0aGVuCiAgICBlY2hvICRkb2NrZXJfY29tcG9zZV91cmkgfCBiYXNlNjQgLS1kZWNvZGUgPiAvcm9vdC9kb2NrZXItY29tcG9zZS55YW1sCmZpCgojIHByb2Nlc3Mgb25lLWxpbmVyCmlmIFtbIC1uICRpbWFnZV9vbmVsaW5lciBdXTsgdGhlbgogICAgZWNobyAkaW1hZ2Vfb25lbGluZXIgfCBiYXNlNjQgLS1kZWNvZGUgPiAkZGxfYXBwCmZpCgojIHJ1biBkbCBhcHBsaWNhdGlvbgppZiBbIC1mICIkZGxfYXBwIiBdOyB0aGVuCiAgICBjaG1vZCAreCAkZGxfYXBwCiAgICBzdWRvIC11ICIkZGxfYXBwX3VzZXIiIGJhc2ggLWMgIiRkbF9hcHAiID4+IC92YXIvbG9nL2RsLmxvZyAyPiYxCiAgICBpZiBbICQ/IC1lcSAwIF07IHRoZW4KICAgICAgICBlY2hvICJETCBhcHBzIGV4ZWN1dGVkIHN1Y2Nlc3NmdWxseSIKICAgICAgICB2bXRvb2xzZCAtLWNtZCAiaW5mby1zZXQgZ3Vlc3RpbmZvLnZtc2VydmljZS5ib290c3RyYXAuY29uZGl0aW9uIHRydWUsU3VjY2VzcyIKICAgIGVsc2UKICAgICAgICBlcnJvciAiREwgYXBwcyBmYWlsZWQiCiAgICBmaQplbHNlCiAgICBlY2hvICJObyBETCBhcHBsaWNhdGlvbiIKICAgIHZtdG9vbHNkIC0tY21kICJpbmZvLXNldCBndWVzdGluZm8udm1zZXJ2aWNlLmJvb3RzdHJhcC5jb25kaXRpb24gdHJ1ZSxTdWNjZXNzIgpmaQ==
+      - path: /opt/dlvm/dl_app.sh
+        permissions: '0755'
+        content: |
+          #!/bin/bash
+          # using data volume mounted by vRA
+          # in case this is not mounted
+          sudo mkdir -p /opt/data/open-webui
+          sudo chown -R root:vmware /opt/data
+          sudo chmod -R 775 /opt/data
+          cd /opt/data
+          if [ ! -f "/opt/data/.file_download" ]; then
+            # clean up
+            sudo rm -rf *.json .file_downloaded
+            # give vmware docker access
+            sudo usermod -aG docker vmware
+            
+            # add harbor.pse.lab to docker daemon
+            sudo jq '. += {"insecure-registries":["${propgroup.vpaif_dlvm_properties.harbor}"]}' /etc/docker/daemon.json > /opt/data/temp.json && sudo mv /opt/data/temp.json /etc/docker/daemon.json
+            sudo systemctl restart docker
+            
+            # add certificate from harbor
+            openssl s_client -showcerts -servername ${propgroup.vpaif_dlvm_properties.harbor} -connect ${propgroup.vpaif_dlvm_properties.harbor}:443 </dev/null | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > ${propgroup.vpaif_dlvm_properties.harbor}.crt
+            sudo cp ${propgroup.vpaif_dlvm_properties.harbor}.crt /usr/local/share/ca-certificates/${propgroup.vpaif_dlvm_properties.harbor}.crt
+
+            # back to data dir
+            cd /opt/data
+
+            # get postgres connection string
+            POSTGRES_CONFIG=$(grep config-json /opt/dlvm/ovf-env.xml | sed -n 's/.*oe:value="\([^"]*\).*/\1/p')
+            POSTGRES_CONFIG=$(echo $POSTGRES_CONFIG | base64 -d)
+            PGVECTOR_VALUE=$(echo $POSTGRES_CONFIG | jq -r '.rag.pgvector')
+            POSTGRES_PASSWORD_ENC=$(echo $PGVECTOR_VALUE | awk -F[:@/] '{print $5}')
+            POSTGRES_PASSWORD_DEC=$(echo $POSTGRES_PASSWORD_ENC | base64 -d)
+            
+            #get config files
+            wget -P /opt/data/open-webui https://raw.githubusercontent.com/vcf-asa-team/asa-vpaif-n/refs/heads/main/workshop/open-webui/docker-compose-webui-rev-proxy.yaml
+            wget -P /opt/data/open-webui https://raw.githubusercontent.com/vcf-asa-team/asa-vpaif-n/refs/heads/main/workshop/open-webui/.env
+            wget -P /opt/data/open-webui https://raw.githubusercontent.com/vcf-asa-team/asa-vpaif-n/refs/heads/main/workshop/open-webui/nginx.conf
+            
+            #add HF key, app name, db and llm to env file
+            sed -i "s/<app_name>/${input.appName}/g" open-webui/.env
+            sed -i "s|<connection_string>|$PGVECTOR_VALUE|g" open-webui/.env
+            sed -i "s|DATABASE_URL=postgresql+psycopg2|DATABASE_URL=postgresql|g" open-webui/.env
+            sed -i "0,|postgres-db| s|postgres-db|${input.owuiDBName}|" open-webui/.env
+            sed -i "s/5432.0/5432/g" open-webui/.env
+            sed -i "s/$POSTGRES_PASSWORD_ENC/$POSTGRES_PASSWORD_DEC/g" open-webui/.env
+            # sed -i "13s/OPENAI_API_BASE_URL=http:\/\/open-webui-litellm-1:4000/OPENAI_API_BASE_URLS=http:\/\/${input.llmGateway}:4000;http:\/\/${input.llmGateway}:4000\/pais/g" open-webui/.env
+            # sed -i "13s/OPENAI_API_BASE_URL=http:\/\/open-webui-litellm-1:4000/OPENAI_API_BASE_URLS=http:\/\/${input.llmGateway}:4000;https:\/\/r169-env4-pais-api.pse.lab\/api\/v1\/compatibility\/openai\/v1/g" open-webui/.env
+            sed -i "16s/OPENAI_API_BASE_URL=http:\/\/open-webui-litellm-1:4000/OPENAI_API_BASE_URL=https:\/\/${input.llmGateway}\/api\/v1\/compatibility\/openai\/v1/g" open-webui/.env
+            sed -i "17s/OPENAI_API_KEY=nokey/OPENAI_API_KEYS=sk-1234567890;sk-1234567890/g" open-webui/.env
+            sed -i "s/AUDIO_STT_OPENAI_API_BASE_URL=http:\/\/open-webui-litellm-1/AUDIO_STT_OPENAI_API_BASE_URL=http:\/\/${input.llmGateway}/g" open-webui/.env
+            sed -i "31s/RAG_OPENAI_API_BASE_URL=http:\/\/open-webui-litellm-1:4000\/v1/RAG_OPENAI_API_BASE_URL=https:\/\/${input.llmGateway}\/api\/v1\/compatibility\/openai\/v1/g" open-webui/.env
+            sed -i "32s/RAG_OPENAI_API_KEY=nokey/RAG_OPENAI_API_KEY=sk-1234567890/g" open-webui/.env
+            sed -i "s/RAG_EMBEDDING_MODEL=nv-embed/RAG_EMBEDDING_MODEL=nvidia\/llama-nemotron-embed-1b-v2/g" open-webui/.env
+            sed -i "s|<owui_image>|${propgroup.vpaif_dlvm_properties.harbor}\/paif-n\/open-webui:v0.11.1|g" open-webui/.env
+
+            %{if input.enableOIDC}
+            # enable OIDC SSO via vIDM (Workspace ONE Access)
+            sed -i "s/WEBUI_AUTH=False/WEBUI_AUTH=True/g" open-webui/.env
+            {
+              echo ""
+              echo "#OIDC (vIDM / Workspace ONE Access)"
+              echo "ENABLE_OAUTH_SIGNUP=true"
+              echo "OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true"
+              echo "OAUTH_PROVIDER_NAME=vIDM"
+              echo "OAUTH_SCOPES=openid email profile"
+              echo "OPENID_PROVIDER_URL=${input.oidcProviderUrl}"
+              echo "OAUTH_CLIENT_ID=${input.oidcClientId}"
+              echo "OAUTH_CLIENT_SECRET=${input.oidcClientSecret}"
+              echo "SSL_CERT_FILE=/etc/ssl/certs/oidc-ca-chain.crt"
+            } >> open-webui/.env
+            
+            # fetch the intermediate and root CA certs for the vIDM OIDC provider
+            # so open-webui trusts it when calling out over TLS
+            mkdir -p /opt/data/open-webui/certs
+            OIDC_HOST=$(echo "${input.oidcProviderUrl}" | sed -E 's#^[a-zA-Z]+://##; s#/.*##; s#:.*##')
+            openssl s_client -showcerts -servername "$OIDC_HOST" -connect "$OIDC_HOST:443" </dev/null 2>/dev/null |  sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > open-webui/certs/oidc-ca-chain.crt
+            %{endif}
+
+            # create certs
+            mkdir -p /opt/data/open-webui/certs
+            openssl req -x509 -newkey rsa:2048 -keyout open-webui/certs/cert.key -out open-webui/certs/cert.crt -sha256 -days 365 -nodes -subj "/O=pse.lab/CN=${env.deploymentName}.pse.lab"
+
+            touch /opt/data/.file_download
+          fi
+
+          # Fire up the containers
+          cd /opt/data
+          docker compose -f open-webui/docker-compose-webui-rev-proxy.yaml up -d
+
+          #import functions and models into open-webui
+          if [ ! -f "/opt/data/.file_config" ]; then
+            #wait for containers to start
+            sleep 60
+            
+            # sed -i "s/localhost/${input.llmGateway}/g" asa-vpaif-n/workshop/open-webui/function.json
+            AUTH=$(curl -X 'POST' 'https://localhost/api/v1/auths/signin' -H 'accept: application/json' -H 'Content-Type: application/json' -d '{"email": "admin@localhost", "password": ""}' | jq -r '.token')
+            curl -X "POST" "https://localhost/api/v1/auths/admin/config" -H "Authorization: Bearer $AUTH" -H "accept: application/json" -H "Content-Type: application/json" -d '{"SHOW_ADMIN_DETAILS":true,"ENABLE_SIGNUP":true,"DEFAULT_USER_ROLE":"admin","JWT_EXPIRES_IN":"-1","ENABLE_COMMUNITY_SHARING":true,"ENABLE_MESSAGE_RATING":true}'
+            touch /opt/data/.file_config
+          fi
+      - path: /opt/dlvm/utils.sh
+        permissions: '0755'
+        content: |
+          %{raw}#!/bin/bash
+
+          # Copyright (c) 2024 Broadcom. All Rights Reserved.
+          # Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+          # and/or its subsidiaries.
+          #
+          # This script provides utility functions for DL Workloads initialization.
+
+          # Function to handle errors with a custom error message and set a VM condition
+          error_exit() {
+            echo "Error: $1" >&2
+            vmtoolsd --cmd "info-set guestinfo.vmservice.bootstrap.condition false, DLWorkloadFailure, $1"
+            exit 1
+          }
+
+          # Function to check if the current DLVM version meets the minimum required version
+          check_dlvm_version() {
+            local MIN_DLVM_VERSION="${1}"
+            local DLVM_RELEASE_FILE="/etc/dlvm-release"
+            echo "Info: Minimum supported DL VM version is ${MIN_DLVM_VERSION}."
+            if [[ -f "${DLVM_RELEASE_FILE}" ]]; then
+              source "${DLVM_RELEASE_FILE}" 2>/dev/null
+              if [[ -n "${VERSION:-}" ]]; then
+                  echo "Info: Current DL VM Version is ${VERSION}."
+              else
+                  echo "Warning: DL VM Version information is missing in ${DLVM_RELEASE_FILE}."
+              fi
+            else
+              echo "Info: No /etc/dlvm-release detected. DL VM Version is less than 1.2."
+            fi
+          }
+
+          # Function to source and export environment variables from a given file
+          source_env() {
+            local ENV_FILE="${1}"
+            if [[ -s "${ENV_FILE}" ]]; then
+              echo "Info: Exported variables from ${ENV_FILE}:"
+              cat "${ENV_FILE}"
+              set -a  # Automatically export all variables
+              source "${ENV_FILE}"
+              set +a  # Disable automatic export
+            else
+              echo "Info: environment file not found or empty, skipping proxy setting."
+            fi
+          }
+
+          # Function to log in to a container registry based on OVF configuration
+          login_registry() {
+            # Extract registry-uri, registry-user, and registry-passwd from ovf-env.xml
+            REGISTRY_URI=$(grep registry-uri /opt/dlvm/ovf-env.xml | sed -n 's/.*oe:value="\([^"]*\).*/\1/p')
+            REGISTRY_URI="${REGISTRY_URI:-nvcr.io}"   # Assign default value to REGISTRY_URI if not set
+            REGISTRY_USER=$(grep registry-user /opt/dlvm/ovf-env.xml | sed -n 's/.*oe:value="\([^"]*\).*/\1/p')
+            REGISTRY_PASSWD=$(PYTHONPATH=/opt/dlvm/ /usr/bin/python3 -c 'from dlvminit.ovf_processor import OVFPropertyParser, load_text_file; contents = load_text_file("/opt/dlvm/ovf-env.xml"); properties = OVFPropertyParser(contents=contents).get_properties(); print(properties.get("registry-passwd", ""))')
+
+            # Determine deployment mode based on REGISTRY_URI
+            IMG_REGISTRY_URI=""
+            if [[ "${REGISTRY_URI}" == "nvcr.io" ]]; then
+              IMG_REGISTRY_URI="${REGISTRY_URI}"
+              echo "Info: Registry URI is set to ${IMG_REGISTRY_URI}."
+              # Validate REGISTRY_USER and REGISTRY_PASSWD
+              if [ -z "${REGISTRY_USER}" ] || [ -z "${REGISTRY_PASSWD}" ]; then
+                error_exit "REGISTRY_USER and/or REGISTRY_PASSWD is not defined or is empty. Please ensure both values are correctly configured."
+              fi
+            else
+              IMG_REGISTRY_URI="${REGISTRY_URI}/images"
+              echo "Info: Registry URI is set to a custom private registry, ${IMG_REGISTRY_URI}."
+            fi
+
+            # Docker login if credentials are provided
+            if [[ -n "${REGISTRY_USER}" && -n "${REGISTRY_PASSWD}" ]]; then
+              docker login -u "${REGISTRY_USER}" -p "${REGISTRY_PASSWD}" "${REGISTRY_URI}"
+            else
+              echo "Warning: the ${REGISTRY_URI} registry's username and password are invalid, Skipping Docker login."
+            fi
+          }
+
+          # Function to deploy the DCGM Exporter for GPU metric collection, 
+          # with options to export metrics publicly or locally. 
+          # The export_dcgm_to_public OVF parameter is set to true by default.
+          deploy_dcgm_exporter() {
+            local CONFIG_JSON_BASE64=$(grep 'config-json' /opt/dlvm/ovf-env.xml | sed -n 's/.*oe:value="\([^"]*\).*/\1/p')
+            local CONFIG_JSON=$(echo "${CONFIG_JSON_BASE64}" | base64 --decode)
+            local DCGM_EXPORT_PUBLIC=$(echo "${CONFIG_JSON}" | jq -r '.export_dcgm_to_public // empty')
+
+            DCGM_EXPORTER_IMAGE="${IMG_REGISTRY_URI}/nvidia/k8s/dcgm-exporter"
+            DCGM_EXPORTER_VERSION="3.2.5-3.1.8-ubuntu22.04"
+            if [[ "${DCGM_EXPORT_PUBLIC}" != "false" ]]; then
+              echo "Info: launching DCGM Exporter to collect vGPU metrics, exposed on all network interfaces (0.0.0.0:9400)"
+              DCGM_COMMANDS_PORTS="9400:9400"
+            else
+              echo "Info: DCGM Exporter will be exposed on localhost only (127.0.0.1:9400)."
+              DCGM_COMMANDS_PORTS="127.0.0.1:9400"
+            fi
+            docker run -d --gpus all --cap-add SYS_ADMIN -p "${DCGM_COMMANDS_PORTS}" "$DCGM_EXPORTER_IMAGE":"$DCGM_EXPORTER_VERSION"
+          }
+
+          # Function to enable JupyterLab, either without authentication or with authentication using a randomly generated token. 
+          # The enable_jupyter_auth OVF parameter is set to true by default.
+          enable_jupyter_auth() {
+            local CONFIG_JSON_BASE64=$(grep 'config-json' /opt/dlvm/ovf-env.xml | sed -n 's/.*oe:value="\([^"]*\).*/\1/p')
+            local CONFIG_JSON=$(echo "${CONFIG_JSON_BASE64}" | base64 --decode)
+            local ENABLE_JUPYTER_AUTH=$(echo "${CONFIG_JSON}" | jq -r '.enable_jupyter_auth // empty')
+
+            if [[ "${ENABLE_JUPYTER_AUTH}" != "false" ]]; then
+              echo "Info: Configuring basic authentication for Jupyterlab."
+              # Generate a random jupyter token
+              TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+              # Set the token to guestinfo
+              vmtoolsd --cmd "info-set guestinfo.dlworkload.jupyterlab.token ${TOKEN}"
+              echo "Info: JupyterLab notebook access token, ${TOKEN}"
+            else
+              echo "Info: Authentication disabled as ENABLE_JUPYTER_AUTH is set to false."
+              TOKEN=""
+            fi
+          }%{endraw}
+    bootcmd:
+      - |
+        cloud-init-per once proxy-setup-dlvminit sh -c '
+        # Copyright (c) 2024 Broadcom. All Rights Reserved.
+        # Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+        # and/or its subsidiaries.
+        #
+        # This script provides proxy settings for DL VM vGPU driver pulling, license server registration, docker daemon, and DL workloads.
+        export httpProxy_url="${variable.httpProxy}"
+        export httpsProxy_url="${variable.httpsProxy}"
+        export noProxy_url="${variable.noProxy}"
+        export enableProxyForNVIDIALicense="${variable.enableProxyForNVIDIALicense}"
+        %{raw}
+        echo "[INFO] Updating proxy settings to /opt/dlvm/environment."
+        { cat >> /opt/dlvm/environment <<-EOF
+        http_proxy=${httpProxy_url}
+        https_proxy=${httpsProxy_url}
+        HTTP_PROXY=${httpProxy_url}
+        HTTPS_PROXY=${httpsProxy_url}
+        NO_PROXY=localhost,127.0.0.1,${noProxy_url}
+        EOF
+        } &&
+        mkdir -p /etc/systemd/system/rc-local.service.d &&
+        { cat >> /etc/systemd/system/rc-local.service.d/environment.conf <<-EOF
+        [Service]
+        EnvironmentFile=/opt/dlvm/environment
+        EOF
+        }
+        echo "[INFO] Updating Docker proxy settings to /etc/systemd/system/docker.service.d/proxy.conf and restarting Docker."
+        mkdir -p /etc/systemd/system/docker.service.d &&
+        { cat > /etc/systemd/system/docker.service.d/proxy.conf <<-EOF  
+        [Service]
+        Environment="HTTP_PROXY=${httpProxy_url}"
+        Environment="HTTPS_PROXY=${httpsProxy_url}"
+        Environment="NO_PROXY=localhost,127.0.0.1,${noProxy_url}"
+        EOF
+        } &&
+        systemctl daemon-reload
+        if [ "${enableProxyForNVIDIALicense}" = "true" ]; then
+          echo "[INFO] Updating proxy settings for NVIDIA licensing client to /etc/nvidia/gridd.conf."
+          mkdir -p /etc/nvidia/ && 
+          { cat >> /etc/nvidia/gridd.conf <<-EOF  
+          ProxyServerAddress=$(echo "${httpProxy_url}" | grep -oP "(?<=http://)[^:]+")
+          ProxyServerPort=$(echo "${httpProxy_url}" | grep -oP "(?<=:)[0-9]+")
+        EOF
+          }
+        fi'
+        %{endraw}
+  cloudInit: |
+    #cloud-config
+    ${to_yaml(merge(variable.softwareCloudInit, list_merge='append'))}
+resources:
+  cciNamespace:
+    type: CCI.Supervisor.Namespace
+    metadata:
+      layoutPosition:
+        - 0
+        - 0
+    properties:
+      name: ${input.namespaceName}
+      existing: true
+  dlVmService:
+    type: CCI.Supervisor.Resource
+    metadata:
+      layoutPosition:
+        - 0
+        - 2
+    properties:
+      context: ${resource.cciNamespace.id}
+      wait:
+        fields:
+          - indicatesFailure: false
+            path: status.loadBalancer.ingress[0].ip
+            value: '*'
+      manifest:
+        apiVersion: vmoperator.vmware.com/v1alpha3
+        kind: VirtualMachineService
+        metadata:
+          name: vm-service-${env.shortDeploymentId}
+        spec:
+          ports: '${map_by(variable.exposedPorts, port => {"name": "tcp" + port, "port": port, "protocol": "TCP", "targetPort": port})}'
+          selector:
+            vm-selector: vm-${env.shortDeploymentId}
+          type: LoadBalancer
+  Postgres_DB:
+    type: CCI.Supervisor.Resource
+    dependsOn:
+      - DBConfig
+    metadata:
+      layoutPosition:
+        - 1
+        - 1
+    properties:
+      context: ${resource.cciNamespace.id}
+      wait:
+        conditions:
+          - type: Ready
+            status: 'True'
+          - type: TerminalFailure
+            status: 'True'
+            indicatesFailure: true
+      manifest:
+        apiVersion: databases.dataservices.vmware.com/v1alpha1
+        kind: PostgresCluster
+        spec:
+          adminUsername: pgadmin
+          databaseName: postgres-db
+          version: '17'
+          storageSpace: ${input.databaseStorageSize}
+          storagePolicyName: ${input.databaseStoragePolicy}
+          infrastructurePolicy:
+            name: workshop-infra-policy
+          replicas: 0
+          vmClass:
+            name: ${input.databaseVmClass}
+          databaseConfig:
+            name: 'cfg-${length(env.deploymentName) > 20 ? substring(env.deploymentName, 0, 20) : env.deploymentName}'
+        metadata:
+          name: '${length(env.deploymentName) > 20 ? substring(env.deploymentName, 0, 20) : env.deploymentName}'
+  dlVmDataStorage:
+    type: CCI.Supervisor.Resource
+    metadata:
+      layoutPosition:
+        - 1
+        - 2
+    properties:
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: storage-${env.shortDeploymentId}
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: ${input.dataStorageSize}
+          storageClassName: ${propgroup.vpaif_dlvm_properties.storageClass}
+          volumeMode: Filesystem
+  DSMDBSecret:
+    type: CCI.Supervisor.Resource
+    dependsOn:
+      - Postgres_DB
+    metadata:
+      layoutPosition:
+        - 2
+        - 1
+    properties:
+      context: ${resource.cciNamespace.id}
+      existing: true
+      manifest:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: 'pg-${length(env.deploymentName) > 20 ? substring(env.deploymentName, 0, 20) : env.deploymentName}'
+        stringData:
+          username: pgadmin
+          password: ''
+  dlVmCloudInit:
+    type: CCI.Supervisor.Resource
+    metadata:
+      layoutPosition:
+        - 2
+        - 2
+    properties:
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: cloud-init-${env.shortDeploymentId}
+        stringData:
+          hostname: host-${env.shortDeploymentId}
+          password: ${input.password}
+          public-keys: ${input.sshPublicKeys}
+          user-data: ${base64_encode(variable.cloudInit)}
+          vgpu-license: ${propgroup.paif_dl_vgpu_ai_workshop_9w4np.vgpu_license}
+          vgpu-url: ${propgroup.paif_dl_vgpu_ai_workshop_9w4np.vgpu_url}
+          ngc-api-key: ${propgroup.vpaif_dlvm_properties.NGC_API_KEY}
+          config-json: ${base64_encode(format('{"rag":{"pgvector":"postgresql+psycopg2://%s:%s@%s:%s/%s"}}',resource.Postgres_DB.object.status.connection.username, resource.DSMDBSecret.object.data.password, resource.Postgres_DB.object.status.connection.host,resource.Postgres_DB.object.status.connection.port,resource.Postgres_DB.object.status.connection.dbname))}
+  DBConfig:
+    type: CCI.Supervisor.Resource
+    metadata:
+      layoutPosition:
+        - 0
+        - 1
+    properties:
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: databases.dataservices.vmware.com/v1alpha1
+        kind: DatabaseConfig
+        spec:
+          params:
+            max_connections: '1000'
+            work_mem: 64MB
+            shared_buffers: 4GB
+            effective_cache_size: 12GB
+            maintenance_work_mem: 2GB
+        metadata:
+          name: 'cfg-${length(env.deploymentName) > 20 ? substring(env.deploymentName, 0, 20) : env.deploymentName}'
+  PsqlJob:
+    type: CCI.Supervisor.Resource
+    dependsOn:
+      - Postgres_DB
+      - DSMDBSecret
+    metadata:
+      layoutPosition:
+        - 3
+        - 1
+    properties:
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: psql-${env.shortDeploymentId}
+        spec:
+          template:
+            spec:
+              restartPolicy: Never
+              containers:
+                - name: psql
+                  # image: ${propgroup.vpaif_dlvm_properties.harbor}/paif-n/postgresql-client:latest
+                  image: jbergknoff/postgresql-client:latest
+                  args:
+                    - postgresql://${resource.Postgres_DB.object.status.connection.username}:$(DB_PASSWORD)@${resource.Postgres_DB.object.status.connection.host}:5432/${resource.Postgres_DB.object.status.connection.dbname}
+                    - '-c'
+                    - CREATE DATABASE ${input.owuiDBName};
+                    - '-c'
+                    - ALTER DATABASE ${input.owuiDBName} OWNER TO pgadmin;
+                    - '-c'
+                    - GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO pgadmin;
+                    - '-c'
+                    - GRANT USAGE, CREATE ON SCHEMA public TO pgadmin;
+                    - '-c'
+                    - ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO pgadmin;
+                    - '-c'
+                    - GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO pgadmin;
+                    - '-c'
+                    - ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO pgadmin;
+                  env:
+                    - name: DB_PASSWORD
+                      valueFrom:
+                        secretKeyRef:
+                          name: 'pg-${length(env.deploymentName) > 20 ? substring(env.deploymentName, 0, 20) : env.deploymentName}'
+                          key: password
+  dlVm:
+    type: CCI.Supervisor.Resource
+    dependsOn:
+      - dlVmDataStorage
+      - dlVmCloudInit
+      - Postgres_DB
+      - PsqlJob
+    metadata:
+      layoutPosition:
+        - 3
+        - 2
+    properties:
+      wait:
+        conditions:
+          - type: GuestBootstrap
+            status: 'True'
+          - type: GuestBootstrap
+            status: 'False'
+            reason: DLWorkloadFailure
+            indicatesFailure: true
+          - type: VirtualMachineCreated
+            status: 'True'
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: vmoperator.vmware.com/v1alpha3
+        kind: VirtualMachine
+        metadata:
+          name: vm-${env.shortDeploymentId}
+          labels:
+            vm-selector: vm-${env.shortDeploymentId}
+        spec:
+          imageName: ${propgroup.vpaif_dlvm_properties.vmiImageName}
+          className: ${input.vmClassName}
+          powerState: PoweredOn
+          storageClass: ${propgroup.vpaif_dlvm_properties.storageClass}
+          volumes:
+            - name: dl-vm-data-vol
+              persistentVolumeClaim:
+                claimName: storage-${env.shortDeploymentId}
+          bootstrap:
+            linuxPrep: {}
+            vAppConfig:
+              rawProperties: cloud-init-${env.shortDeploymentId}
+outputs:
+  __deploymentOverview:
+    value: |
+      ### Open-Webui
+
+      To troubleshoot Private AI deployments, see the [Troubleshooting Guide](https://techdocs.broadcom.com/us/en/vmware-cis/private-ai/foundation-with-nvidia/5-2/private-ai-foundation-5-2/deploying-a-deep-learning-virtual-machine/troubleshooting-deep-learning-vm-deployment.html)
+
+      https://docs.nvidia.com/ai-enterprise/workflows-generative-ai/0.1.0/technical-brief.html
+
+      #### Applications
+      - [Open-Webui](${replace(replace("https://$HOST/", "$HOST", "{{resource.dlVmService.object.status.loadBalancer.ingress.[0].ip}}"), "$PORT", to_string(3000))})
+
+      For more information on using DCGM Exporter to monitor GPU - visit this link
+      - https://docs.nvidia.com/datacenter/cloud-native/gpu-telemetry/latest/dcgm-exporter.html
+
+      %{if length(variable.services) > 0}
+      #### Services
+
+      %{for svc in variable.services}- ${svc.name} - ${!svc.exposeToAll ? "localhost" : "{{resource.dlVmService.object.status.loadBalancer.ingress.[0].ip}}"}:${svc.port}
+      %{endfor}
+      %{endif}
+
+      %{if input.enableOIDC}
+      #### OIDC / vIDM
+
+      Register an OAuth/OIDC client in vIDM (Workspace ONE Access) with this redirect URI:
+      - ${replace("https://$HOST/oauth/oidc/callback", "$HOST", "{{resource.dlVmService.object.status.loadBalancer.ingress.[0].ip}}")}
+      %{endif}
+
+      #### Workstation VM
+
+      - ssh `vmware@{{{resource.dlVmService.object.status.loadBalancer.ingress.[0].ip}}}`
+      - Data storage mounted at `/opt/data`

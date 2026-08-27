@@ -5,6 +5,7 @@ services:
     volumes:
       - /opt/data/open-webui:/app/backend/data
       - /opt/data/docs:/data/docs
+      - /opt/data/open-webui/certs/oidc-ca-chain.crt:/etc/ssl/certs/oidc-ca-chain.crt:ro
     environment:
       - ENABLE_OLLAMA_API=False
     extra_hosts:
