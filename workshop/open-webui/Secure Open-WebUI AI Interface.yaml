@@ -241,6 +241,8 @@ variables:
             # create certs
             mkdir -p /opt/data/open-webui/certs
             openssl req -x509 -newkey rsa:2048 -keyout open-webui/certs/cert.key -out open-webui/certs/cert.crt -sha256 -days 365 -nodes -subj "/O=pse.lab/CN=${env.deploymentName}.pse.lab"
+            # ensure the OIDC CA bundle path always exists so the docker-compose bind mount succeeds even when OIDC is disabled
+            touch open-webui/certs/oidc-ca-chain.crt
 
             touch /opt/data/.file_download
           fi

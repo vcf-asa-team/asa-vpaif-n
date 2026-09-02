@@ -180,16 +180,19 @@
       "description": "vIDM / Workspace ONE Access OpenID discovery URL, e.g. https://<vidm-fqdn>/SAAS/auth/.well-known/openid-configuration",
       "signpost": "vIDM / Workspace ONE Access OpenID discovery URL, e.g. https://<vidm-fqdn>/SAAS/auth/.well-known/openid-configuration",
       "type": { "dataType": "string", "isMultiple": false },
+      "default": "",
       "constraints": { "required": false }
     },
     "oidcClientId": {
       "label": "vIDM OAuth client ID",
       "type": { "dataType": "string", "isMultiple": false },
+      "default": "",
       "constraints": { "required": false }
     },
     "oidcClientSecret": {
       "label": "vIDM OAuth client secret",
       "type": { "dataType": "secureString", "isMultiple": false },
+      "default": "",
       "constraints": { "required": false }
     }
   },
