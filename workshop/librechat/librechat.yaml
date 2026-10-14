@@ -2,7 +2,7 @@ version: 1.2.1
 cache: true
 endpoints:
   custom:
-    - name: "PAIF-N Gateway"
+    - name: "PAIS Gateway"
       apiKey: "sk-1234567890"
       baseURL: "https://<llm_gateway>/api/v1/compatibility/openai/v1"
       models:
@@ -10,4 +10,4 @@ endpoints:
         fetch: true
       titleConvo: true
       titleModel: "current_model"
-      modelDisplayLabel: "PAIF-N Gateway"
+      modelDisplayLabel: "PAIS Gateway"

@@ -223,6 +223,7 @@ variables:
               echo "#OIDC (vIDM / Workspace ONE Access)"
               echo "ENABLE_OAUTH_SIGNUP=true"
               echo "OAUTH_MERGE_ACCOUNTS_BY_EMAIL=true"
+              echo "OAUTH_EMAIL_CLAIM=acct"
               echo "OAUTH_PROVIDER_NAME=vIDM"
               echo "OAUTH_SCOPES=openid email profile"
               echo "OPENID_PROVIDER_URL=${input.oidcProviderUrl}"

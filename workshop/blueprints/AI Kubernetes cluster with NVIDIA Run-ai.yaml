@@ -1,0 +1,1108 @@
+# Copyright (c) 2026 Broadcom. All Rights Reserved.
+# Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+# and/or its subsidiaries.
+
+# Phase 2 of a two-phase Run:ai setup: creates its own GPU-enabled Kubernetes
+# cluster, installs the NVIDIA GPU Operator, and registers that cluster as a
+# Run:ai compute cluster against an existing Run:ai control plane (deployed
+# via the companion "AI Kubernetes cluster with NVIDIA Run-ai Control Plane"
+# blueprint).
+
+formatVersion: 2
+metadata:
+  deploymentSettings:
+    disableUpdateDay2Action: true
+    hideDisabledDay2Actions: true
+variables:
+  namespaceName: ai-workshop-m3fmp
+  httpProxyHost:
+  httpProxyPort:
+  httpProxy: ""
+  httpsProxy: ""
+  noProxy: ""
+  proxyConfig:
+    systemProxy:
+      http: ${variable.httpProxy}
+      https: ${variable.httpsProxy}
+      noProxy: ${split(variable.noProxy, ',')}
+inputs:
+  controlPlaneCount:
+    type: integer
+    title: Node count
+    description: Control plane node count
+    default: 1
+    enum:
+      - 1
+      - 3
+  controlPlaneVmClassName:
+    type: string
+    title: Control Plane VM class
+    description: Control Plane Virtual Machine Class Name
+    oneOf:
+      - title: best-effort-2xlarge - 8 CPUs and 64 GB memory
+        const: best-effort-2xlarge
+      - title: best-effort-4xlarge - 16 CPUs and 128 GB memory
+        const: best-effort-4xlarge
+      - title: best-effort-8xlarge - 32 CPUs and 128 GB memory
+        const: best-effort-8xlarge
+      - title: best-effort-large - 4 CPUs and 16 GB memory
+        const: best-effort-large
+      - title: best-effort-medium - 2 CPUs and 8 GB memory
+        const: best-effort-medium
+      - title: best-effort-small - 2 CPUs and 4 GB memory
+        const: best-effort-small
+      - title: best-effort-xlarge - 4 CPUs and 32 GB memory
+        const: best-effort-xlarge
+      - title: best-effort-xsmall - 2 CPUs and 2 GB memory
+        const: best-effort-xsmall
+    default: best-effort-2xlarge
+  workerCount:
+    type: integer
+    title: Node count
+    description: GPU worker node count
+    default: 1
+    enum:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+      - 16
+  workerVmClassName:
+    type: string
+    title: GPU Worker VM class
+    description: GPU Worker Virtual Machine Class Name
+    oneOf:
+      - title: gpu-a100-small-8c - 1 vGPU(8 GB), 2 CPUs and 16 GB memory
+        const: gpu-a100-small-8c
+      - title: gpu-rtx6-small-8c - 1 vGPU(8 GB), 4 CPUs and 16 GB memory
+        const: gpu-rtx6-small-8c
+      - title: gpu-rtx6-large-96c - 1 vGPU(96 GB), 32 CPUs and 128 GB memory
+        const: gpu-rtx6-large-96c
+    default: gpu-a100-small-8c
+  generalWorkerCount:
+    type: integer
+    title: Node count
+    description: General-purpose (non-GPU) worker node count. The runai-cluster chart's generic components (cluster-sync, scheduler, kube-state-metrics, pod-grouper, etc.) cannot schedule on the tainted GPU worker node or the tainted Kubernetes control-plane node, so they need their own untainted node pool.
+    default: 1
+    enum:
+      - 1
+      - 2
+      - 3
+  generalWorkerVmClassName:
+    type: string
+    title: General Worker VM class
+    description: General-purpose Worker Virtual Machine Class Name (non-GPU)
+    oneOf:
+      - title: best-effort-2xlarge - 8 CPUs and 64 GB memory
+        const: best-effort-2xlarge
+      - title: best-effort-4xlarge - 16 CPUs and 128 GB memory
+        const: best-effort-4xlarge
+      - title: best-effort-8xlarge - 32 CPUs and 128 GB memory
+        const: best-effort-8xlarge
+    default: best-effort-4xlarge
+  runaiControlPlaneUrl:
+    type: string
+    title: Run:ai Control Plane URL
+    description: Base URL of the NVIDIA Run:ai control plane this cluster will register with, e.g. https://runai.my-company.lab
+  runaiClusterUid:
+    type: string
+    title: Run:ai Cluster UID
+    description: Cluster UID generated when this cluster was created in the Run:ai control plane UI (New Cluster wizard)
+  runaiClusterUrl:
+    type: string
+    title: Run:ai Cluster URL
+    description: Externally reachable URL the Run:ai control plane will use to reach this cluster, as shown in the cluster installation wizard
+  runaiClientSecret:
+    type: string
+    encrypted: true
+    title: Run:ai Client Secret
+    description: Client secret generated for this cluster in the Run:ai control plane cluster installation wizard
+  runaiClusterIngressClass:
+    type: string
+    title: Run:ai Cluster Ingress Class
+    description: Ingress class for the Run:ai cluster component's own services (clusterConfig.global.ingress.ingressClass). This cluster has no ingress controller pre-installed, so the job installs ingress-nginx itself and uses its "nginx" class by default - only override this if you've already got a real ingress controller on this cluster.
+    default: nginx
+  runaiVersion:
+    type: string
+    title: Run:ai Cluster Chart Version
+    description: NVIDIA Run:ai cluster Helm chart version to install (must exist in the runai NGC Helm repo - check with `helm search repo runai/runai-cluster --versions`). Leave blank to install the latest available version. Must match the version used for the Run:ai control plane.
+    default: ""
+  enableInference:
+    type: boolean
+    title: Enable Run:ai Inference Support
+    description: Installs Knative Serving (with Kourier networking, cluster-local mode) and LeaderWorkerSet (LWS), which Run:ai requires before the "Inference" workload type can be used. Leave off for a leaner cluster if you only need Workspace/Training workloads.
+    default: true
+  knativeOperatorVersion:
+    type: string
+    title: Knative Operator Chart Version
+    description: Knative Operator Helm chart version to install. Must resolve to a Knative Serving release in the 1.19-1.21 range per current Run:ai requirements (check `helm search repo knative-operator/knative-operator --versions`). Only used if Inference support is enabled.
+    default: "1.21.0"
+resources:
+  cciNamespace:
+    type: CCI.Supervisor.Namespace
+    metadata:
+      layoutPosition:
+        - 0
+        - 0
+    properties:
+      name: ${variable.namespaceName}
+      existing: true
+  cluster:
+    type: CCI.Supervisor.Resource
+    metadata:
+      layoutPosition:
+        - 1
+        - 0
+    properties:
+      context: ${resource.cciNamespace.id}
+      wait:
+        conditions:
+          - type: Available
+            status: "True"
+          - type: TopologyReconciled
+            status: "True"
+          - type: ControlPlaneAvailable
+            status: "True"
+          - type: WorkersAvailable
+            status: "True"
+      manifest:
+        kind: Cluster
+        apiVersion: cluster.x-k8s.io/v1beta2
+        metadata:
+          name: k8s-cluster-${env.shortDeploymentId}
+          labels:
+            tkg-cluster-selector: k8s-cluster-${env.shortDeploymentId}
+        spec:
+          clusterNetwork:
+            services:
+              cidrBlocks:
+                - 198.51.100.0/12
+            pods:
+              cidrBlocks:
+                - 192.0.2.0/16
+            serviceDomain: cluster.local
+          topology:
+            classRef:
+              name: builtin-generic-v3.6.0
+              namespace: vmware-system-vks-public
+            version: v1.35.5---vmware.1-vkr.1
+            variables:
+              - name: vmClass
+                value: ${input.controlPlaneVmClassName}
+              - name: storageClass
+                value: ${propgroup.vpaif_dlvm_properties.storageClass}
+              - name: osConfiguration
+                value: '${variable.httpProxy != "" && variable.httpsProxy != "" ? variable.proxyConfig : {}}'
+              - name: vsphereOptions
+                value:
+                  persistentVolumes:
+                    availableStorageClasses:
+                      - ${propgroup.vpaif_dlvm_properties.storageClass}
+                    defaultStorageClass: ${propgroup.vpaif_dlvm_properties.storageClass}
+            controlPlane:
+              metadata:
+                annotations:
+                  run.tanzu.vmware.com/resolve-os-image: os-name=ubuntu, os-version=24.04
+              replicas: ${input.controlPlaneCount}
+            workers:
+              machineDeployments:
+                - class: node-pool
+                  metadata:
+                    annotations:
+                      run.tanzu.vmware.com/resolve-os-image: os-name=ubuntu, os-version=24.04
+                  name: worker
+                  replicas: ${input.workerCount}
+                  variables:
+                    overrides:
+                      - name: vmClass
+                        value: ${input.workerVmClassName}
+                      - name: volumes
+                        value:
+                          - capacity: 100Gi
+                            mountPath: /var/lib/containerd
+                            name: containerd-dir
+                            storageClass: ${propgroup.vpaif_dlvm_properties.storageClass}
+                          - capacity: 100Gi
+                            mountPath: /var/lib/kubelet
+                            name: kubelet-dir
+                            storageClass: ${propgroup.vpaif_dlvm_properties.storageClass}
+                - class: node-pool
+                  metadata:
+                    annotations:
+                      run.tanzu.vmware.com/resolve-os-image: os-name=ubuntu, os-version=24.04
+                  name: general-worker
+                  replicas: ${input.generalWorkerCount}
+                  variables:
+                    overrides:
+                      - name: vmClass
+                        value: ${input.generalWorkerVmClassName}
+  clusterBootstrap:
+    type: CCI.Supervisor.Resource
+    createTimeout: 45m
+    metadata:
+      layoutPosition:
+        - 2
+        - 0
+    dependsOn:
+      - cluster
+    properties:
+      context: ${resource.cciNamespace.id}
+      existing: true
+      manifest:
+        apiVersion: run.tanzu.vmware.com/v1alpha3
+        kind: ClusterBootstrap
+        metadata:
+          name: k8s-cluster-${env.shortDeploymentId}
+      wait:
+        conditions:
+          - indicatesFailure: false
+            status: 'True'
+            type: Guest-Cluster-Auth-Service-ReconcileSucceeded
+          - indicatesFailure: false
+            status: 'True'
+            type: Kapp-Controller-ReconcileSucceeded
+          - indicatesFailure: false
+            status: 'True'
+            type: Metrics-Server-ReconcileSucceeded
+          - indicatesFailure: false
+            status: 'True'
+            type: Pinniped-ReconcileSucceeded
+          - indicatesFailure: false
+            status: 'True'
+            type: Secretgen-Controller-ReconcileSucceeded
+          - indicatesFailure: false
+            status: 'True'
+            type: Vsphere-Cpi-ReconcileSucceeded
+          - indicatesFailure: false
+            type: Vsphere-Pv-Csi-ReconcileSucceeded
+            status: 'True'
+  cciNgcSecret:
+    type: CCI.Supervisor.Resource
+    dependsOn:
+      - clusterBootstrap
+    metadata:
+      layoutPosition:
+        - 3
+        - 0
+    properties:
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: nvaie-apikey-${env.shortDeploymentId}
+        type: Opaque
+        stringData:
+          username: $oauthtoken
+          password: ${propgroup.vpaif_dlvm_properties.NGC_API_KEY}
+  cciNsgpuOperatorJob:
+    type: CCI.Supervisor.Resource
+    metadata:
+      layoutPosition:
+        - 4
+        - 0
+    dependsOn:
+      - cciNgcSecret
+    createTimeout: 120m
+    properties:
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: job-${env.shortDeploymentId}
+          finalizers:
+            - foregroundDeletion
+        spec:
+          completions: 1
+          parallelism: 1
+          ttlSecondsAfterFinished: 86400
+          backoffLimit: 0
+          template:
+            spec:
+              containers:
+                - name: nvidia-driver-installer
+                  image: paif.packages.broadcom.com/tkg-gpu-console:9.0.0.0
+                  volumeMounts:
+                    - name: cluster-kubeconfig-volume
+                      mountPath: /etc/vks-kubeconfig
+                      readOnly: true
+                  env:
+                    - name: NGC_API_KEY
+                      valueFrom:
+                        secretKeyRef:
+                          name: nvaie-apikey-${env.shortDeploymentId}
+                          key: password
+                  command:
+                    - /bin/bash
+                    - '-c'
+                  args:
+                    - |
+                      #!/bin/bash
+                      export VERIFY_CHECKSUM=false
+                      export HTTP_PROXY=${variable.httpProxy}
+                      export HTTPS_PROXY=${variable.httpsProxy}
+                      export NO_PROXY=${variable.noProxy}
+                      export GPU_OPERATOR_VERSION="v26.3.1"
+                      export VGPU_DRIVER_VERSION="580.159.03"
+
+                      # Function to create client config token file
+                      create_client_config_token() {
+                        echo "Status: Creating client config token file"
+                        echo -n ${propgroup.paif_dl_vgpu_ai_workshop2_g5pxh.vgpu_license} > client_configuration_token.tok
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to create client configuration token"
+                          exit 1
+                        fi
+                      }
+
+                      # Function to download and unzip NGC CLI
+                      download_ngc_cli() {
+                        export NGC_USER_EMAIL=vmware@broadcom.com
+                        echo "Status: Downloading NGC CLI"
+                        NGC_CLI_VERSION="4.3.0"
+                        NGC_CLI_URL="https://api.ngc.nvidia.com/v2/resources/nvidia/ngc-apps/ngc_cli/versions/4.3.0/files/ngccli_linux.zip"
+                        if [ -n "$HTTPS_PROXY" ]; then
+                          echo "Proxy config detected. Using proxy to download NGC CLI"
+                          curl -L -x $HTTPS_PROXY --remote-header-name $NGC_CLI_URL -o /tmp/ngccli_linux.zip
+                        else
+                          curl -L --remote-header-name $NGC_CLI_URL -o /tmp/ngccli_linux.zip
+                        fi
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to download NGC CLI"
+                          exit 1
+                        fi
+
+                        unzip /tmp/ngccli_linux.zip -d /tmp
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to unzip NGC CLI"
+                          exit 1
+                        fi
+
+                        export PATH=$PATH:/tmp/ngc-cli
+                      }
+
+                      # Function to download GPU operator script
+                      download_gpu_operator_script() {
+                        echo "Status: Downloading GPU operator script"
+                        echo "create a proxy settings file for driver installation"
+                        printf "driver:\n  env:\n    - name: HTTPS_PROXY\n      value: \"${variable.httpsProxy}\"\n    - name: HTTP_PROXY\n      value: \"${variable.httpProxy}\"\n    - name: https_proxy\n      value: \"${variable.httpsProxy}\"\n    - name: http_proxy\n      value: \"${variable.httpProxy}\"\n" > env-proxy-values.yaml
+                        ngc --org=nvidia registry resource download-version nvidia/vgpu/gpu-operator-installer-7:7.5
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to download GPU installer script"
+                          exit 1
+                        fi
+                      }
+
+                      # Function to set KUBECONFIG to VKS KubeConfig
+                      set_vks_kubeconfig() {
+                        export KUBECONFIG=/etc/vks-kubeconfig/k8s-cluster-kubeconfig-admin
+                      }
+
+                      # Function to execute GPU operator script
+                      execute_gpu_operator_script() {
+                        echo "Status: Installing GPU operator"
+                        export VALUES_FILE=env-proxy-values.yaml
+                        export HELM_INSTALL_OPTS=" --set toolkit.env[0].name=RUNTIME_CONFIG_SOURCE  --set toolkit.env[0].value=file=/etc/containerd/config.toml"
+
+                        bash ./gpu-operator-installer-7_v7.5/gpu-operator-nvaie-7.5.sh install
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to install GPU Operator"
+                          exit 1
+                        fi
+                      }
+
+                      # Function to determine if parameter is an integer
+                      is_integer() {
+                        [[ $1 =~ ^-?[0-9]+$ ]]
+                      }
+
+                      # Function to check GPU count
+                      check_gpu_count() {
+                        MAX_RETRIES=400
+                        RETRY_COUNT=0
+                        GPU_COUNT=null
+                        while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
+                          GPU_COUNT=$(kubectl get nodes -l nvidia.com/gpu.present -o json | jq 'try .items[0].status.allocatable | try with_entries(select(.key | startswith("nvidia.com/"))) | try with_entries(select(.value != "0")) | .["nvidia.com/gpu"]' | tr -d '"')
+
+                          if is_integer $GPU_COUNT ; then
+                            echo "GPU count is $GPU_COUNT"
+                            break
+                          else
+                            sleep 10
+                            ((RETRY_COUNT++))
+                          fi
+                        done
+
+                        if ! is_integer $GPU_COUNT; then
+                          echo "Failure: GPU count is still null after maximum retries. Failing the job"
+                          exit 1
+                        fi
+
+                        if [[ $GPU_COUNT -eq 1 ]]; then
+                          create_time_slicing_config_map $GPU_COUNT
+                        fi
+                      }
+
+                      # Function to create ConfigMap
+                      create_time_slicing_config_map() {
+                        echo "Status: Enabling GPU time slicing for $1 GPUs"
+
+                        GPU_COUNT=$1
+                        REPLICAS=1  # Default value
+
+                        if [ $GPU_COUNT -eq 1 ]; then
+                          REPLICAS=2
+                        fi
+
+                        printf "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: time-slicing-config-all\n  namespace: gpu-operator\ndata:\n  any: |-\n    version: v1\n    flags:\n      migStrategy: none\n    sharing:\n      timeSlicing:\n        resources:\n        - name: nvidia.com/gpu\n          replicas: $REPLICAS\n" > time-slicing-config.yaml
+
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to create ConfigMap time-slicing-config-all"
+                          exit 1
+                        fi
+
+                        kubectl apply -f time-slicing-config.yaml
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to create time-slicing configmap"
+                          exit 1
+                        fi
+
+                        kubectl patch clusterpolicies.nvidia.com/cluster-policy -n gpu-operator --type merge -p '{"spec": {"devicePlugin": {"config": {"name": "time-slicing-config-all", "default": "any"}}}}'
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to patch ClusterPolicy"
+                          exit 1
+                        fi
+
+                        # wait for time slicing to be applied
+                        wait_for_gpu_count $REPLICAS
+                      }
+
+                      # Function to wait for GPU count to reach the expected value
+                      wait_for_gpu_count() {
+                        EXPECTED_GPU_COUNT=$1
+                        RETRY_COUNT=0
+
+                        while [[ $RETRY_COUNT -lt 400 ]]; do
+                          CURRENT_GPU_COUNT=$(kubectl get nodes -l nvidia.com/gpu.present -o json | jq '.items[0].status.allocatable | with_entries(select(.key | startswith("nvidia.com/"))) | with_entries(select(.value != "0")) | .["nvidia.com/gpu"]' | tr -d '"')
+
+                          if [[ $CURRENT_GPU_COUNT == $EXPECTED_GPU_COUNT ]]; then
+                            echo "Success: GPU count is now $EXPECTED_GPU_COUNT"
+                            break
+                          fi
+
+                          sleep 10
+                          ((RETRY_COUNT++))
+                        done
+
+                        if [[ $CURRENT_GPU_COUNT != $EXPECTED_GPU_COUNT ]]; then
+                          echo "Failure: GPU count did not reach $EXPECTED_GPU_COUNT after maximum retries"
+                          exit 1
+                        fi
+                      }
+
+                      # Function to wait for daemonset to be ready
+                      wait_for_daemonset() {
+                        echo "Status: Waiting till nvidia-operator-validator daemonset is ready"
+                        DAEMONSET_NAME="nvidia-operator-validator"
+                        NAMESPACE="gpu-operator"
+                        MAX_RETRIES=400
+                        RETRY_INTERVAL=10
+                        RETRY_COUNT=0
+                        DAEMONSET_COUNT=$(kubectl get daemonset $DAEMONSET_NAME -n $NAMESPACE -o json | jq .status.numberReady)
+                        while [[ $DAEMONSET_COUNT -lt 1 && $RETRY_COUNT -lt $MAX_RETRIES ]]; do
+                          sleep $RETRY_INTERVAL
+                          DAEMONSET_COUNT=$(kubectl get daemonset $DAEMONSET_NAME -n $NAMESPACE -o json | jq .status.numberReady)
+                          ((RETRY_COUNT++))
+                        done
+
+                        if [[ $DAEMONSET_COUNT -lt 1 ]]; then
+                          echo "Failure: $DAEMONSET_NAME daemonset failed to come up in namespace $NAMESPACE"
+                          exit 1
+                        fi
+                      }
+
+                      # Function to validate Nvidia license
+                      validate_license() {
+                        echo "Status: Capturing license info"
+                        DAEMONSET_NAME="nvidia-driver-daemonset"
+                        POD_NAME=$(kubectl get pods -n $NAMESPACE --selector=app=$DAEMONSET_NAME -o jsonpath='{.items[0].metadata.name}')
+                        license_info=$(kubectl -n $NAMESPACE exec $POD_NAME -- nvidia-smi -q | grep -m 1 'License Status')
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to capture license info"
+                          exit 1
+                        fi
+
+                        expiry=$(echo "$license_info" | grep -oP '(?<=Expiry: ).* GMT')
+                        expiry_date=$(date -d "$expiry" +%s)
+                        current_date=$(date +%s)
+                        if [[ $expiry_date -le $current_date ]]; then
+                          echo "Failure: License has expired or will expire today."
+                          exit 1
+                        fi
+
+                        cuda_info=$(kubectl -n $NAMESPACE exec $POD_NAME -- nvidia-smi -q | grep 'CUDA Version')
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to capture Cuda version info"
+                          exit 1
+                        fi
+                        export cuda_version=$(echo $cuda_info | grep -oP '(?<=: )\d+\.\d+')
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to extract Cuda version"
+                          exit 1
+                        fi
+                      }
+
+                      create_client_config_token
+                      download_ngc_cli
+                      download_gpu_operator_script
+                      set_vks_kubeconfig
+                      execute_gpu_operator_script
+                      check_gpu_count
+                      wait_for_daemonset
+                      validate_license
+              restartPolicy: Never
+              volumes:
+                - name: cluster-kubeconfig-volume
+                  secret:
+                    secretName: k8s-cluster-${env.shortDeploymentId}-kubeconfig
+                    items:
+                      - key: value
+                        path: k8s-cluster-kubeconfig-admin
+      wait:
+        conditions:
+          - indicatesFailure: false
+            status: 'True'
+            type: Complete
+        fields:
+          - indicatesFailure: true
+            path: status.failed
+            value: '1'
+        executionLogs:
+          progressMessagePattern: Status:\s*(.*)
+          failureMessagePattern: Failure:\s*(.*)
+  cciRunaiClientSecret:
+    type: CCI.Supervisor.Resource
+    dependsOn:
+      - cciNsgpuOperatorJob
+    metadata:
+      layoutPosition:
+        - 5
+        - 0
+    properties:
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: runai-client-secret-${env.shortDeploymentId}
+        type: Opaque
+        stringData:
+          clientSecret: ${input.runaiClientSecret}
+  cciRunaiInstallJob:
+    type: CCI.Supervisor.Resource
+    metadata:
+      layoutPosition:
+        - 6
+        - 0
+    dependsOn:
+      - cciRunaiClientSecret
+    createTimeout: 60m
+    properties:
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: runai-install-job-${env.shortDeploymentId}
+          finalizers:
+            - foregroundDeletion
+        spec:
+          completions: 1
+          parallelism: 1
+          ttlSecondsAfterFinished: 86400
+          backoffLimit: 0
+          template:
+            spec:
+              containers:
+                - name: runai-cluster-installer
+                  image: paif.packages.broadcom.com/tkg-gpu-console:9.0.0.0
+                  volumeMounts:
+                    - name: cluster-kubeconfig-volume
+                      mountPath: /etc/vks-kubeconfig
+                      readOnly: true
+                    - name: runai-client-secret-volume
+                      mountPath: /etc/runai-secret
+                      readOnly: true
+                  env:
+                    - name: NGC_API_KEY
+                      valueFrom:
+                        secretKeyRef:
+                          name: nvaie-apikey-${env.shortDeploymentId}
+                          key: password
+                  command:
+                    - /bin/bash
+                    - '-c'
+                  args:
+                    - |
+                      #!/bin/bash
+                      export HTTP_PROXY=${variable.httpProxy}
+                      export HTTPS_PROXY=${variable.httpsProxy}
+                      export NO_PROXY=${variable.noProxy}
+                      export RUNAI_CHART_VERSION="${input.runaiVersion}"
+                      export RUNAI_CONTROL_PLANE_URL="${input.runaiControlPlaneUrl}"
+                      export RUNAI_CLUSTER_URL="${input.runaiClusterUrl}"
+                      export RUNAI_CLUSTER_INGRESS_CLASS="${input.runaiClusterIngressClass}"
+                      export ENABLE_INFERENCE="${input.enableInference}"
+                      export KNATIVE_OPERATOR_VERSION="${input.knativeOperatorVersion}"
+
+                      # Function to set KUBECONFIG to VKS KubeConfig
+                      set_vks_kubeconfig() {
+                        export KUBECONFIG=/etc/vks-kubeconfig/k8s-cluster-kubeconfig-admin
+                      }
+
+                      # This cluster has no ingress controller installed, so install ingress-nginx
+                      # ourselves, exposed via a LoadBalancer Service that vSphere Supervisor assigns an IP to.
+                      # Without this, the runai-cluster chart's cluster-api-ingress has no controller
+                      # implementing it, so the control plane can never reach this cluster's API.
+                      install_ingress_nginx() {
+                        echo "Status: Adding ingress-nginx Helm repository"
+                        helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to add ingress-nginx Helm repository"
+                          exit 1
+                        fi
+                        helm repo update
+
+                        echo "Status: Installing ingress-nginx"
+                        helm upgrade -i ingress-nginx ingress-nginx/ingress-nginx \
+                          -n ingress-nginx --create-namespace \
+                          --set controller.service.type=LoadBalancer
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to install ingress-nginx"
+                          exit 1
+                        fi
+                      }
+
+                      wait_for_ingress_lb_ip() {
+                        echo "Status: Waiting for ingress-nginx LoadBalancer IP to be assigned"
+                        MAX_RETRIES=60
+                        RETRY_COUNT=0
+                        INGRESS_IP=""
+                        while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
+                          INGRESS_IP=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+                          if [ -n "$INGRESS_IP" ]; then
+                            echo "Success: ingress-nginx LoadBalancer IP is $INGRESS_IP"
+                            break
+                          fi
+                          sleep 10
+                          ((RETRY_COUNT++))
+                        done
+
+                        if [ -z "$INGRESS_IP" ]; then
+                          echo "Failure: ingress-nginx LoadBalancer never received an external IP"
+                          exit 1
+                        fi
+
+                        echo "Status: Point DNS for this cluster's URL at $INGRESS_IP if it isn't already"
+                      }
+
+                      # Run:ai requires the Prometheus Operator and CRDs on the cluster before cluster install
+                      install_kube_prometheus_stack() {
+                        echo "Status: Adding prometheus-community Helm repository"
+                        helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to add prometheus-community Helm repository"
+                          exit 1
+                        fi
+                        helm repo update
+
+                        echo "Status: Installing kube-prometheus-stack (Run:ai prerequisite)"
+                        helm upgrade -i kube-prometheus-stack prometheus-community/kube-prometheus-stack \
+                          -n monitoring --create-namespace
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to install kube-prometheus-stack"
+                          exit 1
+                        fi
+                      }
+
+                      wait_for_prometheus_operator() {
+                        echo "Status: Waiting for Prometheus Operator to be ready"
+                        kubectl -n monitoring rollout status deployment/kube-prometheus-stack-operator --timeout=600s
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Prometheus Operator failed to become ready"
+                          exit 1
+                        fi
+                      }
+
+                      # NVIDIA Run:ai Helm chart is distributed through NGC, authenticated with the same NGC API key used for the GPU Operator
+                      add_runai_helm_repo() {
+                        echo "Status: Adding NVIDIA Run:ai Helm repository"
+                        helm repo add runai https://helm.ngc.nvidia.com/nvidia/runai --force-update \
+                          --username='$oauthtoken' \
+                          --password="$NGC_API_KEY"
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to add NVIDIA Run:ai Helm repository"
+                          exit 1
+                        fi
+                        helm repo update
+                      }
+
+                      # Run:ai cluster images are pulled from nvcr.io; the chart's pre-install
+                      # hook pods expect an imagePullSecret named runai-reg-creds to already exist.
+                      create_image_pull_secret() {
+                        echo "Status: Creating runai-reg-creds image pull secret for nvcr.io"
+                        kubectl create namespace runai --dry-run=client -o yaml | kubectl apply -f -
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to ensure runai namespace exists"
+                          exit 1
+                        fi
+
+                        kubectl create secret docker-registry runai-reg-creds \
+                          --docker-server=https://nvcr.io \
+                          --docker-username='$oauthtoken' \
+                          --docker-password="$NGC_API_KEY" \
+                          --docker-email=vmware@broadcom.com \
+                          --namespace=runai \
+                          --dry-run=client -o yaml | kubectl apply -f -
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to create runai-reg-creds image pull secret"
+                          exit 1
+                        fi
+                      }
+
+                      # The Run:ai cluster's pre-install hook validates the control plane's TLS
+                      # certificate; a self-signed cert isn't trusted by default, so fetch the
+                      # control plane's live cert over the network and register it as a trusted CA.
+                      trust_control_plane_ca() {
+                        RUNAI_CONTROL_PLANE_HOST=$(echo "$RUNAI_CONTROL_PLANE_URL" | sed -E 's#^[a-zA-Z]+://##')
+
+                        echo "Status: Fetching the Run:ai control plane's TLS certificate to trust"
+                        openssl s_client -connect "$RUNAI_CONTROL_PLANE_HOST:443" -servername "$RUNAI_CONTROL_PLANE_HOST" </dev/null 2>/dev/null | openssl x509 -outform PEM > /tmp/runai-ca.pem
+                        if [ $? -ne 0 ] || [ ! -s /tmp/runai-ca.pem ]; then
+                          echo "Failure: Failed to fetch the control plane's TLS certificate"
+                          exit 1
+                        fi
+
+                        kubectl -n runai create secret generic runai-ca-cert \
+                          --from-file=runai-ca.pem=/tmp/runai-ca.pem \
+                          --dry-run=client -o yaml | kubectl apply -f -
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to create runai-ca-cert secret"
+                          exit 1
+                        fi
+
+                        kubectl -n runai label secret runai-ca-cert run.ai/cluster-wide=true run.ai/name=runai-ca-cert --overwrite
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to label runai-ca-cert secret"
+                          exit 1
+                        fi
+                      }
+
+                      install_runai_cluster() {
+                        echo "Status: Available runai/runai-cluster chart versions"
+                        helm search repo runai/runai-cluster --versions
+
+                        HELM_VERSION_ARG=""
+                        if [ -n "$RUNAI_CHART_VERSION" ]; then
+                          HELM_VERSION_ARG="--version $RUNAI_CHART_VERSION"
+                        fi
+
+                        # The Run:ai cluster wizard's controlPlane.url has no scheme, unlike cluster.url
+                        RUNAI_CONTROL_PLANE_HOST=$(echo "$RUNAI_CONTROL_PLANE_URL" | sed -E 's#^[a-zA-Z]+://##')
+
+                        echo "Status: Installing NVIDIA Run:ai cluster components"
+                        helm upgrade -i runai-cluster runai/runai-cluster \
+                          -n runai --create-namespace \
+                          --set controlPlane.url="$RUNAI_CONTROL_PLANE_HOST" \
+                          --set controlPlane.clientSecret="$(cat /etc/runai-secret/clientSecret)" \
+                          --set cluster.uid="${input.runaiClusterUid}" \
+                          --set cluster.url="${input.runaiClusterUrl}" \
+                          --set clusterConfig.global.ingress.ingressClass="$RUNAI_CLUSTER_INGRESS_CLASS" \
+                          --set global.fipsMode=off \
+                          --set global.customCA.enabled=true \
+                          $HELM_VERSION_ARG
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to install NVIDIA Run:ai cluster"
+                          exit 1
+                        fi
+                      }
+
+                      wait_for_runai_pods() {
+                        echo "Status: Waiting for NVIDIA Run:ai cluster pods to become ready"
+                        MAX_RETRIES=180
+                        RETRY_COUNT=0
+                        while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
+                          TOTAL=$(kubectl -n runai get pods --no-headers 2>/dev/null | wc -l)
+                          NOT_READY=$(kubectl -n runai get pods --no-headers 2>/dev/null | awk '{print $2}' | awk -F/ '$1!=$2' | wc -l)
+                          if [[ $TOTAL -gt 0 && $NOT_READY -eq 0 ]]; then
+                            echo "Success: All $TOTAL Run:ai pods are ready"
+                            break
+                          fi
+                          sleep 10
+                          ((RETRY_COUNT++))
+                        done
+
+                        if [[ $NOT_READY -ne 0 || $TOTAL -eq 0 ]]; then
+                          echo "Failure: NVIDIA Run:ai cluster pods failed to become ready in namespace runai"
+                          exit 1
+                        fi
+                      }
+
+                      # Run:ai's "Inference" workload type requires Knative Serving (with Kourier
+                      # networking, external-access mode) and LeaderWorkerSet (LWS) on the cluster.
+                      # Neither chart sets securityContext.seccompProfile by default, which this
+                      # cluster's "restricted" Pod Security enforcement requires - relax enforcement
+                      # to "baseline" on just these namespaces so their pods pass admission.
+                      enable_inference_support() {
+                        RUNAI_CLUSTER_HOST=$(echo "$RUNAI_CLUSTER_URL" | sed -E 's#^[a-zA-Z]+://##')
+                        echo "Status: Creating knative-operator, knative-serving, and lws-system namespaces"
+                        for ns in knative-operator knative-serving lws-system; do
+                          kubectl create namespace $ns --dry-run=client -o yaml | kubectl apply -f -
+                          if [ $? -ne 0 ]; then
+                            echo "Failure: Failed to ensure $ns namespace exists"
+                            exit 1
+                          fi
+                          kubectl label namespace $ns pod-security.kubernetes.io/enforce=baseline --overwrite
+                          if [ $? -ne 0 ]; then
+                            echo "Failure: Failed to relax Pod Security enforcement on $ns"
+                            exit 1
+                          fi
+                        done
+
+                        echo "Status: Adding knative-operator Helm repository"
+                        helm repo add knative-operator https://knative.github.io/operator
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to add knative-operator Helm repository"
+                          exit 1
+                        fi
+                        helm repo update
+
+                        echo "Status: Available knative-operator chart versions"
+                        helm search repo knative-operator/knative-operator --versions
+
+                        echo "Status: Installing the Knative Operator"
+                        helm upgrade -i knative-operator knative-operator/knative-operator \
+                          --version "$KNATIVE_OPERATOR_VERSION" \
+                          --namespace knative-operator
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to install the Knative Operator"
+                          exit 1
+                        fi
+
+                        echo "Status: Waiting for the Knative Operator to be ready"
+                        kubectl -n knative-operator rollout status deployment/knative-operator --timeout=300s
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Knative Operator failed to become ready"
+                          exit 1
+                        fi
+
+                        echo "Status: Generating a self-signed wildcard TLS certificate for *.$RUNAI_CLUSTER_HOST"
+                        openssl req -x509 -nodes -days 825 -newkey rsa:2048 \
+                          -keyout /tmp/inference-wildcard.key -out /tmp/inference-wildcard.crt \
+                          -subj "/CN=*.$RUNAI_CLUSTER_HOST" \
+                          -addext "subjectAltName=DNS:*.$RUNAI_CLUSTER_HOST"
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to generate the inference wildcard TLS certificate"
+                          exit 1
+                        fi
+
+                        kubectl -n knative-serving create secret tls runai-cluster-inference-tls-secret \
+                          --cert=/tmp/inference-wildcard.crt --key=/tmp/inference-wildcard.key \
+                          --dry-run=client -o yaml | kubectl apply -f -
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to create runai-cluster-inference-tls-secret"
+                          exit 1
+                        fi
+
+                        echo "Status: Applying the KnativeServing resource (external-access mode) for domain $RUNAI_CLUSTER_HOST"
+                        KNATIVE_SERVING_YAML='
+                        apiVersion: operator.knative.dev/v1beta1
+                        kind: KnativeServing
+                        metadata:
+                          name: knative-serving
+                          namespace: knative-serving
+                        spec:
+                          config:
+                            config-autoscaler:
+                              enable-scale-to-zero: "true"
+                            config-features:
+                              kubernetes.podspec-affinity: enabled
+                              kubernetes.podspec-init-containers: enabled
+                              kubernetes.podspec-persistent-volume-claim: enabled
+                              kubernetes.podspec-persistent-volume-write: enabled
+                              kubernetes.podspec-schedulername: enabled
+                              kubernetes.podspec-securitycontext: enabled
+                              kubernetes.podspec-tolerations: enabled
+                              kubernetes.podspec-volumes-emptydir: enabled
+                              kubernetes.podspec-fieldref: enabled
+                              kubernetes.containerspec-addcapabilities: enabled
+                              kubernetes.podspec-nodeselector: enabled
+                              multi-container: enabled
+                              kubernetes.podspec-hostipc: enabled
+                              kubernetes.podspec-hostnetwork: enabled
+                            domain:
+                              '"$RUNAI_CLUSTER_HOST"': ""
+                            network:
+                              domainTemplate: "{{.Name}}-{{.Namespace}}.{{.Domain}}"
+                              ingress-class: kourier.ingress.networking.knative.dev
+                              default-external-scheme: https
+                            observability:
+                              metrics-protocol: "prometheus"
+                              request-metrics-protocol: "http/protobuf"
+                              request-metrics-endpoint: "http://prometheus-operated.monitoring.svc.cluster.local:9090/api/v1/otlp/v1/metrics"
+                          high-availability:
+                            replicas: 2
+                          ingress:
+                            kourier:
+                              enabled: true
+                        '
+                        echo "$KNATIVE_SERVING_YAML" | kubectl apply -f -
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to apply the KnativeServing resource"
+                          exit 1
+                        fi
+
+                        echo "Status: Applying the Ingress fronting Kourier for *.$RUNAI_CLUSTER_HOST"
+                        INFERENCE_INGRESS_YAML='
+                        apiVersion: networking.k8s.io/v1
+                        kind: Ingress
+                        metadata:
+                          name: knative-serving
+                          namespace: knative-serving
+                        spec:
+                          ingressClassName: '"$RUNAI_CLUSTER_INGRESS_CLASS"'
+                          rules:
+                          - host: "*.'"$RUNAI_CLUSTER_HOST"'"
+                            http:
+                              paths:
+                              - backend:
+                                  service:
+                                    name: kourier
+                                    port:
+                                      number: 80
+                                path: /
+                                pathType: Prefix
+                          tls:
+                          - hosts:
+                            - "*.'"$RUNAI_CLUSTER_HOST"'"
+                            secretName: runai-cluster-inference-tls-secret
+                        '
+                        echo "$INFERENCE_INGRESS_YAML" | kubectl apply -f -
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to apply the inference Ingress"
+                          exit 1
+                        fi
+
+                        echo "Status: Installing LeaderWorkerSet (LWS)"
+                        helm upgrade -i lws oci://registry.k8s.io/lws/charts/lws \
+                          --version=0.7.0 \
+                          --namespace lws-system \
+                          --wait --timeout 300s
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to install LeaderWorkerSet"
+                          exit 1
+                        fi
+                      }
+
+                      set_vks_kubeconfig
+                      install_ingress_nginx
+                      wait_for_ingress_lb_ip
+                      install_kube_prometheus_stack
+                      wait_for_prometheus_operator
+                      add_runai_helm_repo
+                      create_image_pull_secret
+                      trust_control_plane_ca
+                      install_runai_cluster
+                      wait_for_runai_pods
+                      if [ "$ENABLE_INFERENCE" = "true" ]; then
+                        enable_inference_support
+                      fi
+              restartPolicy: Never
+              volumes:
+                - name: cluster-kubeconfig-volume
+                  secret:
+                    secretName: k8s-cluster-${env.shortDeploymentId}-kubeconfig
+                    items:
+                      - key: value
+                        path: k8s-cluster-kubeconfig-admin
+                - name: runai-client-secret-volume
+                  secret:
+                    secretName: runai-client-secret-${env.shortDeploymentId}
+                    items:
+                      - key: clientSecret
+                        path: clientSecret
+      wait:
+        conditions:
+          - indicatesFailure: false
+            status: 'True'
+            type: Complete
+        fields:
+          - indicatesFailure: true
+            path: status.failed
+            value: '1'
+        executionLogs:
+          progressMessagePattern: Status:\s*(.*)
+          failureMessagePattern: Failure:\s*(.*)
+outputs:
+  __deploymentOverview:
+    value: |-
+      ### AI Kubernetes Cluster with NVIDIA Run:ai (Compute Cluster)
+
+      This deployment creates a GPU-enabled Kubernetes cluster, installs the NVIDIA GPU operator, and registers the cluster as a Run:ai compute cluster against an existing Run:ai control plane. This is phase 2 of a two-phase Run:ai setup - deploy the companion "AI Kubernetes cluster with NVIDIA Run-ai Control Plane" blueprint first and create a cluster entry in its UI to get the `runaiClusterUid`/`runaiClientSecret` values this deployment needs.
+
+      #### Services
+      - Kubernetes - {{resource.cluster.object.spec.controlPlaneEndpoint.host}}:{{resource.cluster.object.spec.controlPlaneEndpoint.port}}
+
+      #### Kubernetes
+
+      Initial Setup of Kubernetes cluster and Kubeconfig Generation for Access
+        ```
+        # Fetch the VCF Automation CA certificate
+        openssl s_client -connect rp-r170-env3-auto.pse.lab:443 -showcerts </dev/null 2>/dev/null | openssl x509 -outform PEM > vcfa-ca-cert.pem
+
+        # Create the VCF Automation context
+        vcf context create cci -e rp-r170-env3-auto.pse.lab -t cci --api-token <VCF_CLI_API_TOKEN> --tenant-name pais --ca-certificate vcfa-ca-cert.pem
+
+        # Use the VCF Automation context
+        vcf context use cci:${variable.namespaceName}:${env.projectName}
+
+        # Install the VCF CLI cluster plugin
+        vcf plugin install cluster
+
+        # Register the Kubernetes cluster JWT authenticator
+        vcf cluster register-vcfa-jwt-authenticator {{resource.cluster.object.metadata.name}}
+
+        # Generate the Kubernetes cluster kubeconfig
+        vcf cluster kubeconfig get {{resource.cluster.object.metadata.name}} --export-file {{resource.cluster.object.metadata.name}}-kubeconfig
+        ```
+
+      #### NVIDIA Run:ai Cluster Component
+
+      Verifying the Run:ai cluster installation
+        ```
+        kubectl --kubeconfig {{resource.cluster.object.metadata.name}}-kubeconfig -n runai get pods
+        ```
+
+      #### Inference Support
+
+      If `enableInference` was left on, this job also installed Knative Serving (external-access mode) and LeaderWorkerSet so the "Inference" workload type works in the Run:ai UI. Inference workload URLs follow the pattern `https://<workload-name>-<project-namespace>.<domain>`, where `<domain>` is the host from `runaiClusterUrl` (currently `${input.runaiClusterUrl}`). They're served through the same `ingress-nginx` LoadBalancer IP as the cluster API - **add a wildcard DNS record** (`*.<that domain>`) pointing at that IP, since every new Inference workload gets its own subdomain.
+
+      Confirming the cluster connected to the control plane
+      Check **Clusters** in the Run:ai UI at ${input.runaiControlPlaneUrl} - this cluster should show as Connected, or inspect the sync controller logs:
+        ```
+        kubectl --kubeconfig {{resource.cluster.object.metadata.name}}-kubeconfig -n runai logs deploy/cluster-sync
+        ```
+
+      Once connected, GPU nodes, projects, and workloads can be managed from the Run:ai control plane at ${input.runaiControlPlaneUrl}.

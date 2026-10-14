@@ -1,0 +1,446 @@
+formatVersion: 2
+metadata:
+  deploymentSettings:
+    disableUpdateDay2Action: true
+    hideDisabledDay2Actions: true
+inputs:
+  vmClassName:
+    type: string
+    title: VM class
+    description: Virtual Machine Class Name
+    oneOf:
+      - title: gpu-a100-small-8c - 1 vGPU(8 GB), 2 CPUs and 16 GB memory
+        const: gpu-a100-small-8c
+      - title: gpu-l40s-large-48c - 1 vGPU(48 GB), 3 CPUs and 80 GB memory
+        const: gpu-l40s-large-48c
+      - title: gpu-rtx6-large-48c - 1 vGPU(48 GB), 8 CPUs and 48 GB memory
+        const: gpu-rtx6-large-48c
+      - title: gpu-rtx6-med-24c - 1 vGPU(24 GB), 6 CPUs and 24 GB memory
+        const: gpu-rtx6-med-24c
+      - title: gpu-rtx6-small-8c - 1 vGPU(8 GB), 4 CPUs and 16 GB memory
+        const: gpu-rtx6-small-8c
+    default: gpu-rtx6-med-24c
+  dataStorageSize:
+    type: string
+    title: Data disk size
+    description: Additional data disk mounted at "/opt/data"
+    default: 32Gi
+    oneOf:
+      - title: 32Gi
+        const: 32Gi
+      - title: 64Gi
+        const: 64Gi
+      - title: 128Gi
+        const: 128Gi
+      - title: 256Gi
+        const: 256Gi
+      - title: 512Gi
+        const: 512Gi
+  password:
+    type: string
+    title: User password
+    description: Password for user "vmware"
+    encrypted: true
+    writeOnly: true
+  sshPublicKeys:
+    type: string
+    description: The content of the user public key (for example, ~/.ssh/id_rsa.pub)
+    title: SSH public keys
+  exposeDCGM:
+    type: boolean
+    title: Expose DCGM metrics
+    description: Expose DCGM metrics via load balancer
+    default: true
+variables:
+  namespaceName: ai-workshop-m3fmp
+  applications:
+    - name: Inference Service
+      port: 8000
+  services:
+    - name: SSH
+      port: 22
+      exposeToAll: true
+    - name: DCGM Exporter
+      port: 9400
+      exposeToAll: ${input.exposeDCGM}
+  exposedPorts: ${map_by(filter_by(variable.services, svc => svc.exposeToAll), svc => svc.port) + map_by(variable.applications, app => app.port)}
+  httpProxy: ''
+  httpsProxy: ''
+  noProxy: ''
+  enableProxyForNVIDIALicense: false
+  softwareCloudInit:
+    ssh_pwauth: true
+    chpasswd:
+      expire: false
+    fs_setup:
+      - label: data
+        filesystem: ext4
+        device: /dev/sdb
+    mounts:
+      - - /dev/sdb
+        - /opt/data
+        - auto
+        - defaults,nofail
+        - '0'
+        - '0'
+    write_files:
+      - path: /opt/dlvm/dl_app.sh
+        permissions: '0755'
+        content: |
+          #!/bin/bash
+          error_exit() {
+            echo "Error: $1" >&2
+            exit 1
+          }
+
+          sudo mkdir -p /opt/data/model-store
+          export LOCAL_NIM_CACHE=/opt/data/model-store
+          sudo chown -R root:vmware /opt/data
+          sudo chmod -R 775 /opt/data
+          sudo usermod -aG docker vmware
+
+          cd /opt/data
+
+          if [ ! -f /opt/data/.file_downloaded ]; then
+            # clean up
+            sudo rm -rf ngc* *.json .file_downloaded
+            
+            # add harbor to docker daemon
+            sudo jq '. += {"insecure-registries":["${propgroup.vpaif_dlvm_properties.harbor}"]}' /etc/docker/daemon.json > /opt/data/temp.json && sudo mv /opt/data/temp.json /etc/docker/daemon.json
+            sudo systemctl restart docker
+            
+            # add certificate from harbor
+            openssl s_client -showcerts -servername ${propgroup.vpaif_dlvm_properties.harbor} -connect ${propgroup.vpaif_dlvm_properties.harbor}:443 </dev/null | sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > ${propgroup.vpaif_dlvm_properties.harbor}.crt
+            sudo cp ${propgroup.vpaif_dlvm_properties.harbor}.crt /usr/local/share/ca-certificates/${propgroup.vpaif_dlvm_properties.harbor}.crt
+            sudo update-ca-certificates
+            
+            cd /opt/data
+            touch /opt/data/.file_download
+          fi
+
+          # start container
+          cd /opt/data/model-store
+
+          docker run -d --rm \
+              --gpus all \
+              --shm-size=16GB \
+              -e NGC_API_KEY=${propgroup.vpaif_dlvm_properties.NGC_API_KEY} \
+              -e NIM_HTTP_API_PORT=8000 \
+              -e NIM_TRITON_MAX_BATCH_SIZE=32 \
+              -v "$LOCAL_NIM_CACHE:/opt/nim/.cache" \
+              -u $(id -u) \
+              -p 8000:8000 \
+              ${propgroup.vpaif_dlvm_properties.harbor}/nvidia-cache/nim/nvidia/nemotron-ocr-v1:latest
+      - path: /opt/dlvm/utils.sh
+        permissions: '0755'
+        content: |
+          %{raw}#!/bin/bash
+
+          # Copyright (c) 2024 Broadcom. All Rights Reserved.
+          # Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+          # and/or its subsidiaries.
+          #
+          # This script provides utility functions for DL Workloads initialization.
+
+          # Function to handle errors with a custom error message and set a VM condition
+          error_exit() {
+            echo "Error: $1" >&2
+            vmtoolsd --cmd "info-set guestinfo.vmservice.bootstrap.condition false, DLWorkloadFailure, $1"
+            exit 1
+          }
+
+          # Function to check if the current DLVM version meets the minimum required version
+          check_dlvm_version() {
+            local MIN_DLVM_VERSION="${1}"
+            local DLVM_RELEASE_FILE="/etc/dlvm-release"
+            echo "Info: Minimum supported DL VM version is ${MIN_DLVM_VERSION}."
+            if [[ -f "${DLVM_RELEASE_FILE}" ]]; then
+              source "${DLVM_RELEASE_FILE}" 2>/dev/null
+              if [[ -n "${VERSION:-}" ]]; then
+                  echo "Info: Current DL VM Version is ${VERSION}."
+              else
+                  echo "Warning: DL VM Version information is missing in ${DLVM_RELEASE_FILE}."
+              fi
+            else
+              echo "Info: No /etc/dlvm-release detected. DL VM Version is less than 1.2."
+            fi
+          }
+
+          # Function to source and export environment variables from a given file
+          source_env() {
+            local ENV_FILE="${1}"
+            if [[ -s "${ENV_FILE}" ]]; then
+              echo "Info: Exported variables from ${ENV_FILE}:"
+              cat "${ENV_FILE}"
+              set -a  # Automatically export all variables
+              source "${ENV_FILE}"
+              set +a  # Disable automatic export
+            else
+              echo "Info: environment file not found or empty, skipping proxy setting."
+            fi
+          }
+
+          # Function to log in to a container registry based on OVF configuration
+          login_registry() {
+            # Extract registry-uri, registry-user, and registry-passwd from ovf-env.xml
+            REGISTRY_URI=$(grep registry-uri /opt/dlvm/ovf-env.xml | sed -n 's/.*oe:value="\([^"]*\).*/\1/p')
+            REGISTRY_URI="${REGISTRY_URI:-nvcr.io}"   # Assign default value to REGISTRY_URI if not set
+            REGISTRY_USER=$(grep registry-user /opt/dlvm/ovf-env.xml | sed -n 's/.*oe:value="\([^"]*\).*/\1/p')
+            REGISTRY_PASSWD=$(PYTHONPATH=/opt/dlvm/ /usr/bin/python3 -c 'from dlvminit.ovf_processor import OVFPropertyParser, load_text_file; contents = load_text_file("/opt/dlvm/ovf-env.xml"); properties = OVFPropertyParser(contents=contents).get_properties(); print(properties.get("registry-passwd", ""))')
+
+            # Determine deployment mode based on REGISTRY_URI
+            IMG_REGISTRY_URI=""
+            if [[ "${REGISTRY_URI}" == "nvcr.io" ]]; then
+              IMG_REGISTRY_URI="${REGISTRY_URI}"
+              echo "Info: Registry URI is set to ${IMG_REGISTRY_URI}."
+              # Validate REGISTRY_USER and REGISTRY_PASSWD
+              if [ -z "${REGISTRY_USER}" ] || [ -z "${REGISTRY_PASSWD}" ]; then
+                error_exit "REGISTRY_USER and/or REGISTRY_PASSWD is not defined or is empty. Please ensure both values are correctly configured."
+              fi
+            else
+              IMG_REGISTRY_URI="${REGISTRY_URI}/images"
+              echo "Info: Registry URI is set to a custom private registry, ${IMG_REGISTRY_URI}."
+            fi
+
+            # Docker login if credentials are provided
+            if [[ -n "${REGISTRY_USER}" && -n "${REGISTRY_PASSWD}" ]]; then
+              docker login -u "${REGISTRY_USER}" -p "${REGISTRY_PASSWD}" "${REGISTRY_URI}"
+            else
+              echo "Warning: the ${REGISTRY_URI} registry's username and password are invalid, Skipping Docker login."
+            fi
+          }
+
+          # Function to deploy the DCGM Exporter for GPU metric collection, 
+          # with options to export metrics publicly or locally. 
+          # The export_dcgm_to_public OVF parameter is set to true by default.
+          deploy_dcgm_exporter() {
+            local CONFIG_JSON_BASE64=$(grep 'config-json' /opt/dlvm/ovf-env.xml | sed -n 's/.*oe:value="\([^"]*\).*/\1/p')
+            local CONFIG_JSON=$(echo "${CONFIG_JSON_BASE64}" | base64 --decode)
+            local DCGM_EXPORT_PUBLIC=$(echo "${CONFIG_JSON}" | jq -r '.export_dcgm_to_public // empty')
+
+            DCGM_EXPORTER_IMAGE="${IMG_REGISTRY_URI}/nvidia/k8s/dcgm-exporter"
+            DCGM_EXPORTER_VERSION="3.2.5-3.1.8-ubuntu22.04"
+            if [[ "${DCGM_EXPORT_PUBLIC}" != "false" ]]; then
+              echo "Info: launching DCGM Exporter to collect vGPU metrics, exposed on all network interfaces (0.0.0.0:9400)"
+              DCGM_COMMANDS_PORTS="9400:9400"
+            else
+              echo "Info: DCGM Exporter will be exposed on localhost only (127.0.0.1:9400)."
+              DCGM_COMMANDS_PORTS="127.0.0.1:9400:9400"
+            fi
+            docker run -d --gpus all --cap-add SYS_ADMIN -p "${DCGM_COMMANDS_PORTS}" "$DCGM_EXPORTER_IMAGE":"$DCGM_EXPORTER_VERSION"
+          }
+
+          # Function to enable JupyterLab, either without authentication or with authentication using a randomly generated token. 
+          # The enable_jupyter_auth OVF parameter is set to true by default.
+          enable_jupyter_auth() {
+            local CONFIG_JSON_BASE64=$(grep 'config-json' /opt/dlvm/ovf-env.xml | sed -n 's/.*oe:value="\([^"]*\).*/\1/p')
+            local CONFIG_JSON=$(echo "${CONFIG_JSON_BASE64}" | base64 --decode)
+            local ENABLE_JUPYTER_AUTH=$(echo "${CONFIG_JSON}" | jq -r '.enable_jupyter_auth // empty')
+
+            if [[ "${ENABLE_JUPYTER_AUTH}" != "false" ]]; then
+              echo "Info: Configuring basic authentication for Jupyterlab."
+              # Generate a random jupyter token
+              TOKEN=$(python3 -c "import secrets; print(secrets.token_hex(32))")
+              # Set the token to guestinfo
+              vmtoolsd --cmd "info-set guestinfo.dlworkload.jupyterlab.token ${TOKEN}"
+              echo "Info: JupyterLab notebook access token, ${TOKEN}"
+            else
+              echo "Info: Authentication disabled as ENABLE_JUPYTER_AUTH is set to false."
+              TOKEN=""
+            fi
+          }%{endraw}
+    bootcmd:
+      - |
+        cloud-init-per once proxy-setup-dlvminit sh -c '
+        # Copyright (c) 2024 Broadcom. All Rights Reserved.
+        # Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+        # and/or its subsidiaries.
+        #
+        # This script provides proxy settings for DL VM vGPU driver pulling, license server registration, docker daemon, and DL workloads.
+        export httpProxy_url="${variable.httpProxy}"
+        export httpsProxy_url="${variable.httpsProxy}"
+        export noProxy_url="${variable.noProxy}"
+        export enableProxyForNVIDIALicense="${variable.enableProxyForNVIDIALicense}"
+        %{raw}
+        echo "[INFO] Updating proxy settings to /opt/dlvm/environment."
+        { cat >> /opt/dlvm/environment <<-EOF
+        http_proxy=${httpProxy_url}
+        https_proxy=${httpsProxy_url}
+        HTTP_PROXY=${httpProxy_url}
+        HTTPS_PROXY=${httpsProxy_url}
+        NO_PROXY=localhost,127.0.0.1,${noProxy_url}
+        EOF
+        } &&
+        mkdir -p /etc/systemd/system/rc-local.service.d &&
+        { cat >> /etc/systemd/system/rc-local.service.d/environment.conf <<-EOF
+        [Service]
+        EnvironmentFile=/opt/dlvm/environment
+        EOF
+        }
+        echo "[INFO] Updating Docker proxy settings to /etc/systemd/system/docker.service.d/proxy.conf and restarting Docker."
+        mkdir -p /etc/systemd/system/docker.service.d &&
+        { cat > /etc/systemd/system/docker.service.d/proxy.conf <<-EOF  
+        [Service]
+        Environment="HTTP_PROXY=${httpProxy_url}"
+        Environment="HTTPS_PROXY=${httpsProxy_url}"
+        Environment="NO_PROXY=localhost,127.0.0.1,${noProxy_url}"
+        EOF
+        } &&
+        systemctl daemon-reload
+        if [ "${enableProxyForNVIDIALicense}" = "true" ]; then
+          echo "[INFO] Updating proxy settings for NVIDIA licensing client to /etc/nvidia/gridd.conf."
+          mkdir -p /etc/nvidia/ && 
+          { cat >> /etc/nvidia/gridd.conf <<-EOF  
+          ProxyServerAddress=$(echo "${httpProxy_url}" | grep -oP "(?<=http://)[^:]+")
+          ProxyServerPort=$(echo "${httpProxy_url}" | grep -oP "(?<=:)[0-9]+")
+        EOF
+          }
+        fi'
+        %{endraw}
+  cloudInit: |
+    #cloud-config
+    ${to_yaml(merge(variable.softwareCloudInit, list_merge='append'))}
+resources:
+  cciNamespace:
+    type: CCI.Supervisor.Namespace
+    metadata:
+      layoutPosition:
+        - 0
+        - 0
+    properties:
+      name: ${variable.namespaceName}
+      existing: true
+  dlVmService:
+    type: CCI.Supervisor.Resource
+    metadata:
+      layoutPosition:
+        - 0
+        - 0
+    properties:
+      context: ${resource.cciNamespace.id}
+      wait:
+        fields:
+          - indicatesFailure: false
+            path: status.loadBalancer.ingress[0].ip
+            value: '*'
+      manifest:
+        apiVersion: vmoperator.vmware.com/v1alpha3
+        kind: VirtualMachineService
+        metadata:
+          name: vm-service-${env.shortDeploymentId}
+        spec:
+          ports: '${map_by(variable.exposedPorts, port => {"name": "tcp" + port, "port": port, "protocol": "TCP", "targetPort": port})}'
+          selector:
+            vm-selector: vm-${env.shortDeploymentId}
+          type: LoadBalancer
+  dlVmDataStorage:
+    type: CCI.Supervisor.Resource
+    metadata:
+      layoutPosition:
+        - 1
+        - 0
+    properties:
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: storage-${env.shortDeploymentId}
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: ${input.dataStorageSize}
+          storageClassName: vsan-default-storage-policy
+          volumeMode: Filesystem
+  dlVmCloudInit:
+    type: CCI.Supervisor.Resource
+    metadata:
+      layoutPosition:
+        - 2
+        - 0
+    properties:
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: cloud-init-${env.shortDeploymentId}
+        stringData:
+          hostname: host-${env.shortDeploymentId}
+          password: ${input.password}
+          public-keys: ${input.sshPublicKeys}
+          user-data: ${base64_encode(variable.cloudInit)}
+          vgpu-license: ${propgroup.paif_dl_vgpu_ai_workshop_9w4np.vgpu_license}
+          vgpu-url: ${propgroup.paif_dl_vgpu_ai_workshop_9w4np.vgpu_url}
+          ngc-api-key: ${propgroup.vpaif_dlvm_properties.NGC_API_KEY}
+          config-json: ${base64_encode(format('{"export_dcgm_to_public":"%s"}',input.exposeDCGM))}
+  dlVm:
+    type: CCI.Supervisor.Resource
+    dependsOn:
+      - dlVmDataStorage
+      - dlVmCloudInit
+    metadata:
+      layoutPosition:
+        - 3
+        - 0
+    properties:
+      wait:
+        conditions:
+          - type: GuestBootstrap
+            status: 'True'
+          - type: GuestBootstrap
+            status: 'False'
+            reason: Failure
+            indicatesFailure: true
+          - type: GuestBootstrap
+            status: 'False'
+            reason: DLWorkloadFailure
+            indicatesFailure: true
+          - type: VirtualMachineCreated
+            status: 'True'
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: vmoperator.vmware.com/v1alpha3
+        kind: VirtualMachine
+        metadata:
+          name: vm-${env.shortDeploymentId}
+          labels:
+            vm-selector: vm-${env.shortDeploymentId}
+        spec:
+          imageName: ${propgroup.vpaif_dlvm_properties.vmiImageName}
+          className: ${input.vmClassName}
+          powerState: PoweredOn
+          storageClass: vsan-default-storage-policy
+          volumes:
+            - name: dl-vm-data-vol
+              persistentVolumeClaim:
+                claimName: storage-${env.shortDeploymentId}
+          bootstrap:
+            linuxPrep: {}
+            vAppConfig:
+              rawProperties: cloud-init-${env.shortDeploymentId}
+outputs:
+  __deploymentOverview:
+    value: |
+      ### NVIDIA Nemotron OCR
+
+      To troubleshoot Private AI deployments, see the [Troubleshooting Guide](https://techdocs.broadcom.com/us/en/vmware-cis/private-ai/foundation-with-nvidia/5-2/private-ai-foundation-5-2/deploying-a-deep-learning-virtual-machine/troubleshooting-deep-learning-vm-deployment.html)
+
+      https://docs.nvidia.com/ai-enterprise/workflows-generative-ai/0.1.0/technical-brief.html
+
+      For more information on using DCGM Exporter to monitor GPU - visit this link
+      - https://docs.nvidia.com/datacenter/cloud-native/gpu-telemetry/latest/dcgm-exporter.html
+
+      %{if length(variable.services) > 0}
+      #### Services
+
+      %{for svc in variable.services}- ${svc.name} - ${!svc.exposeToAll ? "localhost" : "{{resource.dlVmService.object.status.loadBalancer.ingress.[0].ip}}"}:${svc.port}
+      %{endfor}
+      %{endif}
+
+      #### Workstation VM
+
+      - ssh `vmware@{{{resource.dlVmService.object.status.loadBalancer.ingress.[0].ip}}}`
+      - Data storage mounted at `/opt/data`

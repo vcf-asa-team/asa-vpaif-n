@@ -1,0 +1,497 @@
+# Copyright (c) 2026 Broadcom. All Rights Reserved.
+# Broadcom Confidential. The term "Broadcom" refers to Broadcom Inc.
+# and/or its subsidiaries.
+formatVersion: 2
+metadata:
+  deploymentSettings:
+    disableUpdateDay2Action: true
+    hideDisabledDay2Actions: true
+variables:
+  namespaceName: ai-workshop-m3fmp
+  httpProxyHost: null
+  httpProxyPort: null
+  httpProxy: ''
+  httpsProxy: ''
+  noProxy: ''
+  proxyConfig:
+    systemProxy:
+      http: ${variable.httpProxy}
+      https: ${variable.httpsProxy}
+      noProxy: ${split(variable.noProxy, ',')}
+inputs:
+  controlPlaneCount:
+    type: integer
+    title: Node count
+    description: Control plane node count
+    default: 1
+    enum:
+      - 1
+      - 3
+  controlPlaneVmClassName:
+    type: string
+    title: Control Plane VM class
+    description: Control Plane Virtual Machine Class Name
+    oneOf:
+      - title: best-effort-2xlarge - 8 CPUs and 64 GB memory
+        const: best-effort-2xlarge
+      - title: best-effort-4xlarge - 16 CPUs and 128 GB memory
+        const: best-effort-4xlarge
+      - title: best-effort-8xlarge - 32 CPUs and 128 GB memory
+        const: best-effort-8xlarge
+      - title: best-effort-large - 4 CPUs and 16 GB memory
+        const: best-effort-large
+      - title: best-effort-medium - 2 CPUs and 8 GB memory
+        const: best-effort-medium
+      - title: best-effort-small - 2 CPUs and 4 GB memory
+        const: best-effort-small
+      - title: best-effort-xlarge - 4 CPUs and 32 GB memory
+        const: best-effort-xlarge
+      - title: best-effort-xsmall - 2 CPUs and 2 GB memory
+        const: best-effort-xsmall
+    default: best-effort-2xlarge
+  generalWorkerCount:
+    type: integer
+    title: Node count
+    description: General-purpose (non-GPU) worker node count. The Run:ai control plane's ~25 microservices (Postgres, NATS, Keycloak, Traefik, etc.) are generic workloads that cannot schedule on the tainted GPU worker node, so they need their own untainted node pool.
+    default: 1
+    enum:
+      - 1
+      - 2
+      - 3
+  generalWorkerVmClassName:
+    type: string
+    title: General Worker VM class
+    description: General-purpose Worker Virtual Machine Class Name (non-GPU)
+    oneOf:
+      - title: best-effort-2xlarge - 8 CPUs and 64 GB memory
+        const: best-effort-2xlarge
+      - title: best-effort-4xlarge - 16 CPUs and 128 GB memory
+        const: best-effort-4xlarge
+      - title: best-effort-8xlarge - 32 CPUs and 128 GB memory
+        const: best-effort-8xlarge
+    default: best-effort-4xlarge
+  runaiControlPlaneDomain:
+    type: string
+    title: Run:ai Control Plane Domain
+    description: Fully qualified domain name the Run:ai control plane UI/API will be served on. Leave blank to auto-derive a nip.io domain from the LoadBalancer IP assigned to the ingress controller this job installs (no manual DNS required). If set, must resolve via DNS to that IP.
+    default: ""
+  runaiAdminEmail:
+    type: string
+    title: Run:ai Admin Email
+    description: Email address for the initial Run:ai control plane administrator account
+  runaiAdminPassword:
+    type: string
+    encrypted: true
+    title: Run:ai Admin Password
+    description: Password for the initial Run:ai control plane administrator account (minimum 8 characters, with uppercase, lowercase, digit, and special character)
+  runaiControlPlaneVersion:
+    type: string
+    title: Run:ai Control Plane Chart Version
+    description: NVIDIA Run:ai control plane Helm chart version to install (must exist in the runai NGC Helm repo - check with `helm search repo runai/control-plane --versions`). Leave blank to install the latest available version. Must match the version used when installing the companion Run:ai cluster component.
+    default: ''
+resources:
+  cciNamespace:
+    type: CCI.Supervisor.Namespace
+    properties:
+      name: ${variable.namespaceName}
+      existing: true
+  cluster:
+    type: CCI.Supervisor.Resource
+    properties:
+      context: ${resource.cciNamespace.id}
+      wait:
+        conditions:
+          - type: Available
+            status: 'True'
+          - type: TopologyReconciled
+            status: 'True'
+          - type: ControlPlaneAvailable
+            status: 'True'
+          - type: WorkersAvailable
+            status: 'True'
+      manifest:
+        kind: Cluster
+        apiVersion: cluster.x-k8s.io/v1beta2
+        metadata:
+          name: k8s-cluster-${env.shortDeploymentId}
+          labels:
+            tkg-cluster-selector: k8s-cluster-${env.shortDeploymentId}
+        spec:
+          clusterNetwork:
+            services:
+              cidrBlocks:
+                - 198.51.100.0/12
+            pods:
+              cidrBlocks:
+                - 192.0.2.0/16
+            serviceDomain: cluster.local
+          topology:
+            classRef:
+              name: builtin-generic-v3.6.0
+              namespace: vmware-system-vks-public
+            version: v1.35.5---vmware.1-vkr.1
+            variables:
+              - name: vmClass
+                value: ${input.controlPlaneVmClassName}
+              - name: storageClass
+                value: ${propgroup.vpaif_dlvm_properties.storageClass}
+              - name: osConfiguration
+                value: '${variable.httpProxy != "" && variable.httpsProxy != "" ? variable.proxyConfig : {}}'
+              - name: vsphereOptions
+                value:
+                  persistentVolumes:
+                    availableStorageClasses:
+                      - ${propgroup.vpaif_dlvm_properties.storageClass}
+                    defaultStorageClass: ${propgroup.vpaif_dlvm_properties.storageClass}
+            controlPlane:
+              metadata:
+                annotations:
+                  run.tanzu.vmware.com/resolve-os-image: os-name=ubuntu, os-version=24.04
+              replicas: ${input.controlPlaneCount}
+            workers:
+              machineDeployments:
+                - class: node-pool
+                  metadata:
+                    annotations:
+                      run.tanzu.vmware.com/resolve-os-image: os-name=ubuntu, os-version=24.04
+                  name: general-worker
+                  replicas: ${input.generalWorkerCount}
+                  variables:
+                    overrides:
+                      - name: vmClass
+                        value: ${input.generalWorkerVmClassName}
+  clusterBootstrap:
+    type: CCI.Supervisor.Resource
+    dependsOn:
+      - cluster
+    createTimeout: 45m
+    properties:
+      context: ${resource.cciNamespace.id}
+      existing: true
+      manifest:
+        apiVersion: run.tanzu.vmware.com/v1alpha3
+        kind: ClusterBootstrap
+        metadata:
+          name: k8s-cluster-${env.shortDeploymentId}
+      wait:
+        conditions:
+          - indicatesFailure: false
+            status: 'True'
+            type: Guest-Cluster-Auth-Service-ReconcileSucceeded
+          - indicatesFailure: false
+            status: 'True'
+            type: Kapp-Controller-ReconcileSucceeded
+          - indicatesFailure: false
+            status: 'True'
+            type: Metrics-Server-ReconcileSucceeded
+          - indicatesFailure: false
+            status: 'True'
+            type: Pinniped-ReconcileSucceeded
+          - indicatesFailure: false
+            status: 'True'
+            type: Secretgen-Controller-ReconcileSucceeded
+          - indicatesFailure: false
+            status: 'True'
+            type: Vsphere-Cpi-ReconcileSucceeded
+          - indicatesFailure: false
+            type: Vsphere-Pv-Csi-ReconcileSucceeded
+            status: 'True'
+  cciNgcSecret:
+    type: CCI.Supervisor.Resource
+    dependsOn:
+      - clusterBootstrap
+    properties:
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: nvaie-apikey-${env.shortDeploymentId}
+        type: Opaque
+        stringData:
+          username: $oauthtoken
+          password: ${propgroup.vpaif_dlvm_properties.NGC_API_KEY}
+  cciRunaiControlPlaneJob:
+    type: CCI.Supervisor.Resource
+    dependsOn:
+      - cciNgcSecret
+    createTimeout: 60m
+    properties:
+      context: ${resource.cciNamespace.id}
+      manifest:
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: runai-cp-install-job-${env.shortDeploymentId}
+          finalizers:
+            - foregroundDeletion
+        spec:
+          completions: 1
+          parallelism: 1
+          ttlSecondsAfterFinished: 86400
+          backoffLimit: 0
+          template:
+            spec:
+              containers:
+                - name: runai-control-plane-installer
+                  image: paif.packages.broadcom.com/tkg-gpu-console:9.0.0.0
+                  volumeMounts:
+                    - name: cluster-kubeconfig-volume
+                      mountPath: /etc/vks-kubeconfig
+                      readOnly: true
+                  env:
+                    - name: NGC_API_KEY
+                      valueFrom:
+                        secretKeyRef:
+                          name: nvaie-apikey-${env.shortDeploymentId}
+                          key: password
+                  command:
+                    - /bin/bash
+                    - '-c'
+                  args:
+                    - |
+                      #!/bin/bash
+                      export HTTP_PROXY=${variable.httpProxy}
+                      export HTTPS_PROXY=${variable.httpsProxy}
+                      export NO_PROXY=${variable.noProxy}
+                      export RUNAI_CP_CHART_VERSION="${input.runaiControlPlaneVersion}"
+                      export RUNAI_CP_DOMAIN_INPUT="${input.runaiControlPlaneDomain}"
+
+                      # Function to set KUBECONFIG to VKS KubeConfig
+                      set_vks_kubeconfig() {
+                        export KUBECONFIG=/etc/vks-kubeconfig/k8s-cluster-kubeconfig-admin
+                      }
+
+                      # This cluster has no ingress controller installed, so install ingress-nginx
+                      # ourselves, exposed via a LoadBalancer Service that vSphere Supervisor assigns an IP to.
+                      install_ingress_nginx() {
+                        echo "Status: Adding ingress-nginx Helm repository"
+                        helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to add ingress-nginx Helm repository"
+                          exit 1
+                        fi
+                        helm repo update
+
+                        echo "Status: Installing ingress-nginx"
+                        helm upgrade -i ingress-nginx ingress-nginx/ingress-nginx \
+                          -n ingress-nginx --create-namespace \
+                          --set controller.service.type=LoadBalancer
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to install ingress-nginx"
+                          exit 1
+                        fi
+                      }
+
+                      wait_for_ingress_lb_ip() {
+                        echo "Status: Waiting for ingress-nginx LoadBalancer IP to be assigned"
+                        MAX_RETRIES=60
+                        RETRY_COUNT=0
+                        INGRESS_IP=""
+                        while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
+                          INGRESS_IP=$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null)
+                          if [ -n "$INGRESS_IP" ]; then
+                            echo "Success: ingress-nginx LoadBalancer IP is $INGRESS_IP"
+                            break
+                          fi
+                          sleep 10
+                          ((RETRY_COUNT++))
+                        done
+
+                        if [ -z "$INGRESS_IP" ]; then
+                          echo "Failure: ingress-nginx LoadBalancer never received an external IP"
+                          exit 1
+                        fi
+
+                        if [ -n "$RUNAI_CP_DOMAIN_INPUT" ]; then
+                          export RUNAI_CP_DOMAIN="$RUNAI_CP_DOMAIN_INPUT"
+                        else
+                          IP_DASHED=$(echo "$INGRESS_IP" | tr '.' '-')
+                          export RUNAI_CP_DOMAIN="runai-$IP_DASHED.nip.io"
+                        fi
+                        echo "Status: Run:ai control plane domain is $RUNAI_CP_DOMAIN (point DNS at $INGRESS_IP if you supplied a custom domain)"
+                      }
+
+                      # NVIDIA Run:ai Helm chart is distributed through NGC, authenticated with the same NGC API key used for the GPU Operator
+                      add_runai_helm_repo() {
+                        echo "Status: Adding NVIDIA Run:ai Helm repository"
+                        helm repo add runai https://helm.ngc.nvidia.com/nvidia/runai --force-update \
+                          --username='$oauthtoken' \
+                          --password="$NGC_API_KEY"
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to add NVIDIA Run:ai Helm repository"
+                          exit 1
+                        fi
+                        helm repo update
+                      }
+
+                      # Run:ai control plane images are pulled from nvcr.io; the chart's pre-install
+                      # hook pods expect an imagePullSecret named runai-reg-creds to already exist.
+                      create_image_pull_secret() {
+                        echo "Status: Creating runai-reg-creds image pull secret for nvcr.io"
+                        kubectl create namespace runai-backend --dry-run=client -o yaml | kubectl apply -f -
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to ensure runai-backend namespace exists"
+                          exit 1
+                        fi
+
+                        kubectl create secret docker-registry runai-reg-creds \
+                          --docker-server=https://nvcr.io \
+                          --docker-username='$oauthtoken' \
+                          --docker-password="$NGC_API_KEY" \
+                          --docker-email=vmware@broadcom.com \
+                          --namespace=runai-backend \
+                          --dry-run=client -o yaml | kubectl apply -f -
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to create runai-reg-creds image pull secret"
+                          exit 1
+                        fi
+                      }
+
+                      # nginx-ingress serves a fallback cert (CN=ingress.local) for any host with no
+                      # matching TLS secret, which fails the Run:ai pre-install hook's hostname check
+                      # against $RUNAI_CP_DOMAIN. Generate a self-signed cert for the real domain instead.
+                      create_tls_secret() {
+                        echo "Status: Generating self-signed TLS certificate for $RUNAI_CP_DOMAIN"
+                        openssl req -x509 -nodes -days 825 -newkey rsa:2048 \
+                          -keyout /tmp/tls.key -out /tmp/tls.crt \
+                          -subj "/CN=$RUNAI_CP_DOMAIN" \
+                          -addext "subjectAltName=DNS:$RUNAI_CP_DOMAIN"
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to generate self-signed TLS certificate"
+                          exit 1
+                        fi
+
+                        kubectl -n runai-backend create secret tls runai-backend-tls \
+                          --cert=/tmp/tls.crt --key=/tmp/tls.key \
+                          --dry-run=client -o yaml | kubectl apply -f -
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to create runai-backend-tls secret"
+                          exit 1
+                        fi
+                      }
+
+                      install_runai_control_plane() {
+                        echo "Status: Available runai/control-plane chart versions"
+                        helm search repo runai/control-plane --versions
+
+                        HELM_VERSION_ARG=""
+                        if [ -n "$RUNAI_CP_CHART_VERSION" ]; then
+                          HELM_VERSION_ARG="--version $RUNAI_CP_CHART_VERSION"
+                        fi
+
+                        echo "Status: Installing NVIDIA Run:ai control plane for domain $RUNAI_CP_DOMAIN"
+                        helm upgrade -i runai-backend runai/control-plane \
+                          -n runai-backend --create-namespace \
+                          --set global.domain="$RUNAI_CP_DOMAIN" \
+                          --set global.ingress.ingressClass=nginx \
+                          --set global.ingress.tlsSecretName=runai-backend-tls \
+                          --set tenantsManager.config.adminUsername="${input.runaiAdminEmail}" \
+                          --set tenantsManager.config.adminPassword="${input.runaiAdminPassword}" \
+                          $HELM_VERSION_ARG
+                        if [ $? -ne 0 ]; then
+                          echo "Failure: Failed to install NVIDIA Run:ai control plane"
+                          exit 1
+                        fi
+                      }
+
+                      wait_for_control_plane_pods() {
+                        echo "Status: Waiting for NVIDIA Run:ai control plane pods to become ready"
+                        MAX_RETRIES=240
+                        RETRY_COUNT=0
+                        while [[ $RETRY_COUNT -lt $MAX_RETRIES ]]; do
+                          TOTAL=$(kubectl -n runai-backend get pods --no-headers 2>/dev/null | wc -l)
+                          NOT_READY=$(kubectl -n runai-backend get pods --no-headers 2>/dev/null | awk '{print $2}' | awk -F/ '$1!=$2' | wc -l)
+                          if [[ $TOTAL -gt 0 && $NOT_READY -eq 0 ]]; then
+                            echo "Success: All $TOTAL Run:ai control plane pods are ready"
+                            break
+                          fi
+                          sleep 10
+                          ((RETRY_COUNT++))
+                        done
+
+                        if [[ $NOT_READY -ne 0 || $TOTAL -eq 0 ]]; then
+                          echo "Failure: NVIDIA Run:ai control plane pods failed to become ready in namespace runai-backend"
+                          exit 1
+                        fi
+                      }
+
+                      set_vks_kubeconfig
+                      install_ingress_nginx
+                      wait_for_ingress_lb_ip
+                      add_runai_helm_repo
+                      create_image_pull_secret
+                      create_tls_secret
+                      install_runai_control_plane
+                      wait_for_control_plane_pods
+              restartPolicy: Never
+              volumes:
+                - name: cluster-kubeconfig-volume
+                  secret:
+                    secretName: k8s-cluster-${env.shortDeploymentId}-kubeconfig
+                    items:
+                      - key: value
+                        path: k8s-cluster-kubeconfig-admin
+      wait:
+        conditions:
+          - indicatesFailure: false
+            status: 'True'
+            type: Complete
+        fields:
+          - indicatesFailure: true
+            path: status.failed
+            value: '1'
+        executionLogs:
+          progressMessagePattern: Status:\s*(.*)
+          failureMessagePattern: Failure:\s*(.*)
+outputs:
+  __deploymentOverview:
+    value: |-
+      ### AI Kubernetes Service with NVIDIA Run:ai Control Plane
+
+      This deployment includes a Kubernetes cluster running a self-hosted NVIDIA Run:ai control plane (management/UI/API only - no GPU nodes needed here). This is phase 1 of a two-phase Run:ai setup; GPU worker nodes belong on whichever cluster(s) you register as Run:ai compute clusters via the companion cluster-component blueprint.
+
+      #### Services
+      - Kubernetes - {{resource.cluster.object.spec.controlPlaneEndpoint.host}}:{{resource.cluster.object.spec.controlPlaneEndpoint.port}}
+      - Run:ai control plane UI - see the `cciRunaiControlPlaneJob` logs for "Status: Run:ai control plane domain is ..." (auto-derived via nip.io from the assigned ingress IP unless you supplied `runaiControlPlaneDomain`)
+
+      #### Kubernetes
+
+      Initial Setup of Kubernetes cluster and Kubeconfig Generation for Access
+        ```
+        # Fetch the VCF Automation CA certificate
+        openssl s_client -connect rp-r170-env3-auto.pse.lab:443 -showcerts </dev/null 2>/dev/null | openssl x509 -outform PEM > vcfa-ca-cert.pem
+
+        # Create the VCF Automation context
+        vcf context create cci -e rp-r170-env3-auto.pse.lab -t cci --api-token <VCF_CLI_API_TOKEN> --tenant-name pais --ca-certificate vcfa-ca-cert.pem
+
+        # Use the VCF Automation context
+        vcf context use cci:${variable.namespaceName}:${env.projectName}
+
+        # Install the VCF CLI cluster plugin
+        vcf plugin install cluster
+
+        # Register the Kubernetes cluster JWT authenticator
+        vcf cluster register-vcfa-jwt-authenticator {{resource.cluster.object.metadata.name}}
+
+        # Generate the Kubernetes cluster kubeconfig
+        vcf cluster kubeconfig get {{resource.cluster.object.metadata.name}} --export-file {{resource.cluster.object.metadata.name}}-kubeconfig
+        ```
+
+      #### NVIDIA Run:ai Control Plane - Next Steps
+
+      This job installs ingress-nginx itself (exposed via a LoadBalancer Service) since this cluster has no ingress controller pre-installed. Find the assigned domain/IP in the `cciRunaiControlPlaneJob` logs ("Status: Run:ai control plane domain is ..."). If you supplied `runaiControlPlaneDomain`, point its DNS at the printed IP; otherwise the auto-derived nip.io domain resolves on its own.
+
+      1. Retrieve the Run:ai control plane domain from the job logs as described above.
+      2. Log into the Run:ai UI at `https://<that domain>` using the admin email/password supplied to this deployment.
+      3. Go to **Clusters > New Cluster**, name it `{{resource.cluster.object.metadata.name}}`, and complete the wizard. Run:ai will generate a `cluster.uid` and `controlPlane.clientSecret` - copy both down (the client secret is only shown once).
+      4. Deploy the companion **"AI Kubernetes cluster with NVIDIA Run-ai"** blueprint (phase 2) into the same namespace (`${variable.namespaceName}`), providing:
+         - `existingClusterName` = `{{resource.cluster.object.metadata.name}}`
+         - `runaiControlPlaneUrl` = `https://<the domain from step 1>`
+         - `runaiClusterUid` / `runaiClientSecret` = the values generated in step 3
+         - `runaiVersion` = the exact `control-plane` chart version this job installed (see the `cciRunaiControlPlaneJob` logs for "Status: Available runai/control-plane chart versions" and the version actually used)
+
+      Verifying the control plane installation
+        ```
+        kubectl --kubeconfig {{resource.cluster.object.metadata.name}}-kubeconfig -n runai-backend get pods
+        ```

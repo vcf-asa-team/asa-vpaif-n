@@ -1,0 +1,20 @@
+[project]
+name = "pais-mcp"
+version = "0.1.0"
+description = "MCP server (Streamable HTTP) for Private AI Services (PAIS) by VMware/Broadcom"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=2.0",
+    "httpx>=0.27",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+pais-mcp = "pais_mcp.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pais_mcp"]
