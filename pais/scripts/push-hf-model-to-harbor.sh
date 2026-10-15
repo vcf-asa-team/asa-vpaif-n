@@ -1,4 +1,10 @@
 #!/bin/bash
+# Recommended to run on a deep learning vm
+# or use the commands below to run
+# python3 -m venv myenv
+# source myenv/bin/activate
+# ./push-hf-model-to-harbor.sh
+
 set -euo pipefail
 
 ENV_FILE=".env"
@@ -65,7 +71,7 @@ echo "Please enter the Hugging Face model name to download:"
 read -r MODEL_NAME
 MODEL_NAME="${MODEL_NAME,,}"
 echo "Using lowercase model name: $MODEL_NAME"
-MODEL_DIR="/opt/data/model-store"
+MODEL_DIR="./model-store"
 MODEL_DOWNLOAD_DIR="$MODEL_DIR/$MODEL_NAME"
 echo "Creating directory: $MODEL_DOWNLOAD_DIR"
 mkdir -p "$MODEL_DOWNLOAD_DIR"
@@ -82,7 +88,7 @@ else
     echo "Adding Harbor to Docker daemon.json..."
     sudo jq --arg harbor "$HARBOR" \
         '.["insecure-registries"] = ((.["insecure-registries"] // []) + [$harbor] | unique)' \
-        /etc/docker/daemon.json > /opt/data/temp.json && sudo mv /opt/data/temp.json /etc/docker/daemon.json
+        /etc/docker/daemon.json > ./temp.json && sudo mv ./temp.json /etc/docker/daemon.json
     sudo systemctl restart docker
 fi
 
