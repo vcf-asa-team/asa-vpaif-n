@@ -11,7 +11,7 @@ Cloud Template that deploys [Open WebUI](https://github.com/open-webui/open-webu
 | `docker-compose-webui-rev-proxy.yaml` | Runtime compose file `dl_app.sh` downloads and runs on the VM: the `open-webui` container plus an `nginx` reverse proxy terminating TLS. |
 | `nginx.conf` | Config consumed by the `reverse-proxy` container — TLS termination, websocket/streaming headers, proxies to `open-webui:8080`. |
 | `.env` | Template consumed by the compose file, with `<placeholder>` tokens that `dl_app.sh` fills in at boot (app name, DB connection, image tag, and — only if OIDC is enabled — the vIDM OAuth vars). |
-| `function.json`, `model.json`, `model-cfo.json`, `model-medical.json` | Open WebUI function/model definitions available to import once the app is running (not consumed by the blueprint automatically). |
+| `function-pais_agent_v2.json`, `function-ocr_interceptor.json` | Open WebUI function/model definitions available to import once the app is running (not consumed by the blueprint automatically). |
 | `Dockerfile` | Reference build for a custom Open WebUI image, if you need to rebuild rather than use the pre-built harbor image. |
 
 ## Architecture
