@@ -68,7 +68,38 @@ The request form is grouped into four pages:
 - SSH access: `ssh vmware@<load-balancer-ip>` using the password/key supplied at request time.
 - Data persists at `/opt/data` on the VM across redeploys of the compose stack (but not across VM deletion).
 
+### Troubleshooting OIDC login (`CERTIFICATE_VERIFY_FAILED`)
+
+If logging in via vIDM fails with an error like:
+
+```
+httpx.ConnectError: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: unable to get local issuer certificate
+```
+
+the automatic cert-fetch step in `dl_app.sh` only captures whatever certs vIDM happens to present live during the TLS handshake (`openssl s_client -showcerts`). In practice that has not been a complete trust chain — in one VCF environment with multiple VMCA root CAs (one per vCenter/domain), the live handshake didn't present the actual issuing root at all, and it took **all three certs from vIDM** added manually to resolve it.
+
+To fix it on an already-deployed VM:
+
+1. SSH to the VM and append vIDM's full certificate chain to the bundle (don't just replace what's there — append to it):
+   ```bash
+   sudo nano /opt/data/open-webui/certs/oidc-ca-chain.crt
+   # paste in the additional PEM cert(s) vIDM provides
+   ```
+2. Restart just the `open-webui` container so it re-reads the file — it builds its SSL context once at startup, so editing the file alone isn't picked up live:
+   ```bash
+   cd /opt/data && docker compose -f open-webui/docker-compose-webui-rev-proxy.yaml restart open-webui
+   ```
+3. Verify the bundle parses and shows the certs you expect (look for an entry where `Issuer` equals its own `Subject` — that's the root terminating the chain):
+   ```bash
+   openssl crl2pkcs7 -nocrl -certfile /opt/data/open-webui/certs/oidc-ca-chain.crt | openssl pkcs7 -print_certs -noout
+   ```
+4. If you're not sure which cert(s) vIDM actually needs, check its live issuer chain directly and compare against what you have:
+   ```bash
+   openssl s_client -connect <vidm-fqdn>:443 -servername <vidm-fqdn> </dev/null 2>/dev/null | openssl x509 -noout -issuer -subject
+   ```
+
+Because `/opt/data/.file_download` already exists after first boot, `dl_app.sh`'s own cert-fetch step won't re-run and overwrite this manual fix on subsequent reboots of the same deployment — but a **fresh** deployment of this blueprint will hit the same gap again, since the automated fetch still only grabs whatever's served live during the handshake rather than the full chain. Until that logic is reworked (or the blueprint is changed to accept the CA chain as an input instead of scraping it), expect to repeat this manual step for each new OIDC-enabled deployment.
+
 ### Known caveats
 
-- The OIDC cert-fetch step (`sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p'` over full `openssl s_client -showcerts` output) captures the leaf certificate too, not just the intermediate/root chain — harmless as a trust bundle, just wider than the name implies.
 - `AIOHTTP_CLIENT_SESSION_SSL=False` and `REQUEST_VERIFY=False` are already set in `.env`, which disables TLS verification for some of Open WebUI's own outbound calls regardless of the fetched CA chain — worth confirming the cert bundle is actually the thing enforcing trust for the OIDC token exchange before relying on it.

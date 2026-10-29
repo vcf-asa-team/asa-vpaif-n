@@ -208,12 +208,12 @@ variables:
             # sed -i "13s/OPENAI_API_BASE_URL=http:\/\/open-webui-litellm-1:4000/OPENAI_API_BASE_URLS=http:\/\/${input.llmGateway}:4000;http:\/\/${input.llmGateway}:4000\/pais/g" open-webui/.env
             # sed -i "13s/OPENAI_API_BASE_URL=http:\/\/open-webui-litellm-1:4000/OPENAI_API_BASE_URLS=http:\/\/${input.llmGateway}:4000;https:\/\/r169-env4-pais-api.pse.lab\/api\/v1\/compatibility\/openai\/v1/g" open-webui/.env
             sed -i "16s/OPENAI_API_BASE_URL=http:\/\/open-webui-litellm-1:4000/OPENAI_API_BASE_URL=https:\/\/${input.llmGateway}\/api\/v1\/compatibility\/openai\/v1/g" open-webui/.env
-            sed -i "17s/OPENAI_API_KEY=nokey/OPENAI_API_KEYS=sk-1234567890;sk-1234567890/g" open-webui/.env
+            sed -i "17s/OPENAI_API_KEY=nokey/OPENAI_API_KEY=${propgroup.vpaif_dlvm_properties.paisApiToken}/g" open-webui/.env
             sed -i "s/AUDIO_STT_OPENAI_API_BASE_URL=http:\/\/open-webui-litellm-1/AUDIO_STT_OPENAI_API_BASE_URL=http:\/\/${input.llmGateway}/g" open-webui/.env
             sed -i "31s/RAG_OPENAI_API_BASE_URL=http:\/\/open-webui-litellm-1:4000\/v1/RAG_OPENAI_API_BASE_URL=https:\/\/${input.llmGateway}\/api\/v1\/compatibility\/openai\/v1/g" open-webui/.env
-            sed -i "32s/RAG_OPENAI_API_KEY=nokey/RAG_OPENAI_API_KEY=sk-1234567890/g" open-webui/.env
+            sed -i "32s/RAG_OPENAI_API_KEY=nokey/RAG_OPENAI_API_KEY=${propgroup.vpaif_dlvm_properties.paisApiToken}/g" open-webui/.env
             sed -i "s/RAG_EMBEDDING_MODEL=nv-embed/RAG_EMBEDDING_MODEL=nvidia\/llama-nemotron-embed-1b-v2/g" open-webui/.env
-            sed -i "s|<owui_image>|${propgroup.vpaif_dlvm_properties.harbor}\/paif-n\/open-webui:v0.11.1|g" open-webui/.env
+            sed -i "s|<owui_image>|ghcr.io\/open-webui\/open-webui:latest|g" open-webui/.env
 
             %{if input.enableOIDC}
             # enable OIDC SSO via vIDM (Workspace ONE Access)
