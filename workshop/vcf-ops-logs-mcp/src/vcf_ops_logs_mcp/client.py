@@ -30,16 +30,21 @@ _ALLOWED_OPERATORS = {
 }
 
 
+_API_TOKEN_GRANT_TYPE = "urn:custom:vcf:params:oauth:grant-type:api-token"
+
+
 class VCFOpsLogsClient:
     """Thin async HTTP client for the VCF Operations for Logs (Aria Operations
     for Logs / Log Insight) query API, as surfaced through VCF Operations 9.1's
     unified gateway.
 
-    Auth is two-step: the long-lived api_token is first exchanged for a
-    short-lived JWT scoped to the "ops-li" service
-    (POST config.auth_exchange_path, body {"serviceKeys": [config.service_key]}),
-    then that JWT is sent as "Authorization: Bearer <jwt>" on actual queries.
-    The JWT is cached and re-exchanged automatically on a 401.
+    Auth is two-step, per VCF 9.1's fleet-wide API token model: the long-lived
+    api_token is first exchanged for a short-lived bearer access token via an
+    OAuth2-style "api-token" grant against config.token_endpoint_url (POST,
+    form-urlencoded, on a *different host* than base_url — the SSO/identity
+    broker, not the Operations-for-Logs appliance). That access token is then
+    sent as "Authorization: Bearer <token>" on actual queries, cached, and
+    re-exchanged automatically on a 401 (it's short-lived — ~30 minutes).
 
     Queries use the Log Insight REST API "constraint path" convention:
     GET <events_path>/<field>/<op>/<value>/<field>/<op>/<value>/... Constraints
@@ -55,7 +60,7 @@ class VCFOpsLogsClient:
             verify=config.verify_ssl,
             timeout=config.timeout,
         )
-        self._jwt: str | None = None
+        self._access_token: str | None = None
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -73,40 +78,42 @@ class VCFOpsLogsClient:
         return await self._authed_request("GET", self._config.fields_path)
 
     async def _authed_request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        jwt = await self._ensure_jwt()
-        response = await self._send(method, path, headers={"Authorization": f"Bearer {jwt}"}, **kwargs)
+        token = await self._ensure_access_token()
+        response = await self._send(
+            method, path, headers={"Authorization": f"Bearer {token}"}, **kwargs
+        )
         if response.status_code == 401:
-            # JWT may have expired; re-exchange once and retry.
-            self._jwt = None
-            jwt = await self._ensure_jwt()
+            # Access token may have expired (~30 min TTL); re-exchange once and retry.
+            self._access_token = None
+            token = await self._ensure_access_token()
             response = await self._send(
-                method, path, headers={"Authorization": f"Bearer {jwt}"}, **kwargs
+                method, path, headers={"Authorization": f"Bearer {token}"}, **kwargs
             )
         return _parse_response(response)
 
-    async def _ensure_jwt(self) -> str:
-        if self._jwt is not None:
-            return self._jwt
+    async def _ensure_access_token(self) -> str:
+        if self._access_token is not None:
+            return self._access_token
 
         response = await self._send(
             "POST",
-            self._config.auth_exchange_path,
-            headers={
-                "Authorization": f"{self._config.auth_header_scheme} {self._config.api_token}",
-                "Content-Type": "application/json",
+            self._config.token_endpoint_url,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            data={
+                "grant_type": _API_TOKEN_GRANT_TYPE,
+                "api_token": self._config.api_token,
             },
-            json={"serviceKeys": [self._config.service_key]},
         )
         body = _parse_response(response)
-        jwt = _extract_token(body)
-        if not jwt:
+        token = _extract_token(body)
+        if not token:
             raise VCFOpsLogsAPIError(
                 response.status_code,
-                f"Token exchange at {self._config.auth_exchange_path} did not return a recognizable "
-                f"token field; response was: {body!r}",
+                f"Token exchange at {self._config.token_endpoint_url} did not return a "
+                f"recognizable access_token field; response was: {body!r}",
             )
-        self._jwt = jwt
-        return jwt
+        self._access_token = token
+        return token
 
     async def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:

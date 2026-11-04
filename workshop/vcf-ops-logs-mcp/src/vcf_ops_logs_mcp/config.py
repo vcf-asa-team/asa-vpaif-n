@@ -10,17 +10,14 @@ from mcp.server.transport_security import TransportSecuritySettings
 class VCFOpsLogsConfig:
     base_url: str
     api_token: str
+    # VCF 9.1's fleet-wide API token isn't used directly on calls: it's
+    # exchanged for a short-lived bearer access token via an OAuth2-style
+    # grant against the OIDC token endpoint (a *different host* from
+    # base_url — copy the "Token Endpoint URL" shown on VCF Operations'
+    # "Your API Tokens" page, e.g. https://<sso-fqdn>/acs/t/CUSTOMER/token).
+    token_endpoint_url: str
     verify_ssl: bool = True
     timeout: float = 30.0
-    # VCF Operations 9.1 doesn't accept api_token directly on log queries: it
-    # must first be exchanged for a short-lived JWT scoped to the "ops-li"
-    # (Operations for Logs) service. These three fields configure that
-    # exchange call; the header scheme it expects for the *inbound* api_token
-    # is the one unconfirmed piece here (vROps/VCF Operations classically use
-    # "OpsToken", but flip this to "Bearer" if the exchange call itself 401s).
-    auth_exchange_path: str = "/suite-api/api/auth/token/exchange"
-    auth_header_scheme: str = "OpsToken"
-    service_key: str = "ops-li"
     events_path: str = "/api/v2/events"
     fields_path: str = "/api/v2/fields"
 
@@ -34,6 +31,13 @@ class VCFOpsLogsConfig:
         api_token = os.environ.get("VCF_OPS_LOGS_API_TOKEN")
         if not api_token:
             raise RuntimeError("VCF_OPS_LOGS_API_TOKEN environment variable is required")
+        token_endpoint_url = os.environ.get("VCF_OPS_LOGS_TOKEN_ENDPOINT_URL")
+        if not token_endpoint_url:
+            raise RuntimeError(
+                "VCF_OPS_LOGS_TOKEN_ENDPOINT_URL environment variable is required, e.g. "
+                "https://<sso-fqdn>/acs/t/CUSTOMER/token (the 'Token Endpoint URL' shown "
+                "on VCF Operations' 'Your API Tokens' page)"
+            )
 
         verify_ssl = os.environ.get("VCF_OPS_LOGS_VERIFY_SSL", "true").strip().lower() not in (
             "0",
@@ -45,15 +49,9 @@ class VCFOpsLogsConfig:
         return cls(
             base_url=base_url.rstrip("/"),
             api_token=api_token,
+            token_endpoint_url=token_endpoint_url,
             verify_ssl=verify_ssl,
             timeout=timeout,
-            auth_exchange_path=os.environ.get(
-                "VCF_OPS_LOGS_AUTH_EXCHANGE_PATH", cls.auth_exchange_path
-            ),
-            auth_header_scheme=os.environ.get(
-                "VCF_OPS_LOGS_AUTH_HEADER_SCHEME", cls.auth_header_scheme
-            ),
-            service_key=os.environ.get("VCF_OPS_LOGS_SERVICE_KEY", cls.service_key),
             events_path=os.environ.get("VCF_OPS_LOGS_EVENTS_PATH", cls.events_path),
             fields_path=os.environ.get("VCF_OPS_LOGS_FIELDS_PATH", cls.fields_path),
         )
