@@ -32,26 +32,30 @@ _ALLOWED_OPERATORS = {
 
 class VCFOpsLogsClient:
     """Thin async HTTP client for the VCF Operations for Logs (Aria Operations
-    for Logs / Log Insight) query API.
+    for Logs / Log Insight) query API, as surfaced through VCF Operations 9.1's
+    unified gateway.
 
-    Queries use the long-standing Log Insight REST API v1 "constraint path"
-    convention: GET /api/v1/events/<field>/<op>/<value>/<field>/<op>/<value>/...
-    Constraints are ANDed together server-side — there's no OR, so matching
-    several error terms means one query per term (see monitor.py / the
-    count_errors tool). If your instance exposes a different query shape
-    (e.g. a newer aggregation API), this is the one place to adapt.
+    Auth is two-step: the long-lived api_token is first exchanged for a
+    short-lived JWT scoped to the "ops-li" service
+    (POST config.auth_exchange_path, body {"serviceKeys": [config.service_key]}),
+    then that JWT is sent as "Authorization: Bearer <jwt>" on actual queries.
+    The JWT is cached and re-exchanged automatically on a 401.
+
+    Queries use the Log Insight REST API "constraint path" convention:
+    GET <events_path>/<field>/<op>/<value>/<field>/<op>/<value>/... Constraints
+    are ANDed together server-side — there's no OR, so matching several error
+    terms means one query per term (see monitor.py / the count_errors tool).
     """
 
     def __init__(self, config: VCFOpsLogsConfig) -> None:
+        self._config = config
         self._client = httpx.AsyncClient(
             base_url=config.base_url,
-            headers={
-                "Authorization": f"Bearer {config.api_token}",
-                "Accept": "application/json",
-            },
+            headers={"Accept": "application/json"},
             verify=config.verify_ssl,
             timeout=config.timeout,
         )
+        self._jwt: str | None = None
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -59,29 +63,74 @@ class VCFOpsLogsClient:
     async def query_events(
         self, constraints: list[tuple[str, str, str]], *, limit: int | None = None
     ) -> dict[str, Any]:
-        path = "/api/v1/events" + _constraint_path(constraints)
+        path = self._config.events_path + _constraint_path(constraints)
         params: dict[str, Any] = {}
         if limit is not None:
             params["limit"] = limit
-        return await self._request("GET", path, params=params or None)
+        return await self._authed_request("GET", path, params=params or None)
 
     async def list_fields(self) -> dict[str, Any]:
-        return await self._request("GET", "/api/v1/fields")
+        return await self._authed_request("GET", self._config.fields_path)
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+    async def _authed_request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        jwt = await self._ensure_jwt()
+        response = await self._send(method, path, headers={"Authorization": f"Bearer {jwt}"}, **kwargs)
+        if response.status_code == 401:
+            # JWT may have expired; re-exchange once and retry.
+            self._jwt = None
+            jwt = await self._ensure_jwt()
+            response = await self._send(
+                method, path, headers={"Authorization": f"Bearer {jwt}"}, **kwargs
+            )
+        return _parse_response(response)
+
+    async def _ensure_jwt(self) -> str:
+        if self._jwt is not None:
+            return self._jwt
+
+        response = await self._send(
+            "POST",
+            self._config.auth_exchange_path,
+            headers={
+                "Authorization": f"{self._config.auth_header_scheme} {self._config.api_token}",
+                "Content-Type": "application/json",
+            },
+            json={"serviceKeys": [self._config.service_key]},
+        )
+        body = _parse_response(response)
+        jwt = _extract_token(body)
+        if not jwt:
+            raise VCFOpsLogsAPIError(
+                response.status_code,
+                f"Token exchange at {self._config.auth_exchange_path} did not return a recognizable "
+                f"token field; response was: {body!r}",
+            )
+        self._jwt = jwt
+        return jwt
+
+    async def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
-            response = await self._client.request(method, path, **kwargs)
+            return await self._client.request(method, path, **kwargs)
         except httpx.RequestError as exc:
             raise VCFOpsLogsAPIError(
                 0, f"Failed to reach VCF Operations for Logs API at {path}: {exc}"
             ) from exc
 
-        if response.status_code >= 400:
-            raise VCFOpsLogsAPIError(response.status_code, _extract_error_detail(response))
 
-        if not response.content:
-            return {}
-        return response.json()
+def _parse_response(response: httpx.Response) -> dict[str, Any]:
+    if response.status_code >= 400:
+        raise VCFOpsLogsAPIError(response.status_code, _extract_error_detail(response))
+    if not response.content:
+        return {}
+    return response.json()
+
+
+def _extract_token(body: dict[str, Any]) -> str | None:
+    for key in ("token", "access_token", "jwt", "accessToken", "value"):
+        value = body.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def _constraint_path(constraints: list[tuple[str, str, str]]) -> str:

@@ -12,6 +12,17 @@ class VCFOpsLogsConfig:
     api_token: str
     verify_ssl: bool = True
     timeout: float = 30.0
+    # VCF Operations 9.1 doesn't accept api_token directly on log queries: it
+    # must first be exchanged for a short-lived JWT scoped to the "ops-li"
+    # (Operations for Logs) service. These three fields configure that
+    # exchange call; the header scheme it expects for the *inbound* api_token
+    # is the one unconfirmed piece here (vROps/VCF Operations classically use
+    # "OpsToken", but flip this to "Bearer" if the exchange call itself 401s).
+    auth_exchange_path: str = "/suite-api/api/auth/token/exchange"
+    auth_header_scheme: str = "OpsToken"
+    service_key: str = "ops-li"
+    events_path: str = "/api/v2/events"
+    fields_path: str = "/api/v2/fields"
 
     @classmethod
     def from_env(cls) -> "VCFOpsLogsConfig":
@@ -36,6 +47,15 @@ class VCFOpsLogsConfig:
             api_token=api_token,
             verify_ssl=verify_ssl,
             timeout=timeout,
+            auth_exchange_path=os.environ.get(
+                "VCF_OPS_LOGS_AUTH_EXCHANGE_PATH", cls.auth_exchange_path
+            ),
+            auth_header_scheme=os.environ.get(
+                "VCF_OPS_LOGS_AUTH_HEADER_SCHEME", cls.auth_header_scheme
+            ),
+            service_key=os.environ.get("VCF_OPS_LOGS_SERVICE_KEY", cls.service_key),
+            events_path=os.environ.get("VCF_OPS_LOGS_EVENTS_PATH", cls.events_path),
+            fields_path=os.environ.get("VCF_OPS_LOGS_FIELDS_PATH", cls.fields_path),
         )
 
 

@@ -15,20 +15,48 @@ that proactively watches for error patterns between queries.
 | `count_errors` | Count matches per error term over a time window (capped at `limit` per term). |
 | `get_recent_findings` | Read findings already captured by the background monitor — no new query. |
 
+## Auth: token exchange, not a plain bearer token
+
+VCF Operations 9.1 unified several products (Operations Manager, Operations
+for Logs, Operations for Networks) behind one API gateway, and log queries
+don't accept a plain VCF Operations API token directly. Instead:
+
+1. `VCF_OPS_LOGS_API_TOKEN` is POSTed to `VCF_OPS_LOGS_AUTH_EXCHANGE_PATH`
+   (default `/suite-api/api/auth/token/exchange`) as
+   `Authorization: <VCF_OPS_LOGS_AUTH_HEADER_SCHEME> <token>` with body
+   `{"serviceKeys": ["<VCF_OPS_LOGS_SERVICE_KEY>"]}` (default service key
+   `ops-li`).
+2. The JWT in that response is cached and sent as `Authorization: Bearer
+   <jwt>` on every actual log query, and transparently re-exchanged if a
+   query comes back `401` (expired JWT).
+
+`VCF_OPS_LOGS_AUTH_HEADER_SCHEME` defaults to `OpsToken` (the classic
+vROps/VCF Operations API-token scheme) — flip it to `Bearer` in `.env` if the
+*exchange* call itself 401s. See `client.py`'s `_ensure_jwt` for this flow.
+
 ## How queries are built
 
-Queries use the long-standing Log Insight REST API v1 "constraint path"
-convention: `GET /api/v1/events/<field>/<op>/<value>/<field>/<op>/<value>/...`,
-where each `field/operator/value` triple is **ANDed** together server-side
-(there is no OR across constraints). Supported operators: `CONTAINS`,
+Queries use the Log Insight REST API "constraint path" convention:
+`GET /api/v2/events/<field>/<op>/<value>/<field>/<op>/<value>/...`, where
+each `field/operator/value` triple is **ANDed** together server-side (there
+is no OR across constraints). Supported operators: `CONTAINS`,
 `NOT_CONTAINS`, `EQ`, `NOT_EQ`, `GT`, `GTE`, `LT`, `LTE`. Timestamps are
-epoch milliseconds.
+epoch milliseconds. The path defaults to `/api/v2/events`
+(`VCF_OPS_LOGS_EVENTS_PATH`) — the classic standalone Log Insight API used a
+`/api/v1/...` prefix, but VCF Operations 9.1's unified gateway uses `v2`.
 
-If your instance exposes a different query API shape (e.g. a newer
-aggregation endpoint, or different field names for severity/source), the one
-place to adapt is `client.py` (`query_events` / `_constraint_path`). Run
-`list_log_fields` and a simple `search_logs` call first to sanity-check
-compatibility before relying on this for a demo.
+`list_log_fields` hits `VCF_OPS_LOGS_FIELDS_PATH` (default `/api/v2/fields`),
+which is an **unconfirmed guess by analogy** with the events path, not
+something I found documented directly — if it 404s, that's the one to fix
+via env var once you find the real path in your Swagger UI.
+
+If your instance exposes a still-different query shape (VCF Operations also
+exposes a separate async query API under `/vrlic/api/v1/query/{post,get,delete}`
+that submits a query and polls for results by ID, rather than the
+synchronous `GET /api/v2/events` used here), the place to adapt is
+`client.py` (`query_events` / `_constraint_path`). Run `list_log_fields` and
+a simple `search_logs` call first to sanity-check compatibility before
+relying on this for a demo.
 
 ## Background monitor loop
 
@@ -65,9 +93,10 @@ cp .env.example .env
 # edit .env: set VCF_OPS_LOGS_BASE_URL and VCF_OPS_LOGS_API_TOKEN
 ```
 
-`VCF_OPS_LOGS_API_TOKEN` is sent as `Authorization: Bearer <token>` on every
-request. Set `VCF_OPS_LOGS_VERIFY_SSL=false` if the instance uses a
-self-signed lab certificate.
+`VCF_OPS_LOGS_API_TOKEN` is exchanged for a short-lived JWT before use —
+see "Auth: token exchange, not a plain bearer token" above. Set
+`VCF_OPS_LOGS_VERIFY_SSL=false` if the instance uses a self-signed lab
+certificate.
 
 ## Running
 
