@@ -161,7 +161,10 @@ def _auth_headers(access_token: str, ops_li_jwt: str) -> dict[str, str]:
 
 
 def _parse_response(response: httpx.Response) -> dict[str, Any]:
-    if response.status_code >= 400:
+    # >=300, not >=400: a redirect here means the wrong host/path (e.g. to a
+    # login page), not success — none of these APIs legitimately redirect,
+    # and silently following one into an HTML body then crashes on .json().
+    if response.status_code >= 300:
         raise VCFOpsLogsAPIError(response.status_code, _extract_error_detail(response))
     if not response.content:
         return {}
@@ -177,6 +180,10 @@ def _extract_token(body: dict[str, Any]) -> str | None:
 
 
 def _extract_error_detail(response: httpx.Response) -> str:
+    if 300 <= response.status_code < 400:
+        location = response.headers.get("location")
+        if location:
+            return f"redirected to {location} — likely the wrong host/path for this call"
     try:
         body = response.json()
     except ValueError:

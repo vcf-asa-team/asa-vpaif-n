@@ -36,10 +36,17 @@ component-scoped* JWT on top of that. Both are needed:
 3. That access token is used to run a **second exchange**, scoped to the
    `ops-li` (Operations for Logs) component: `POST
    VCF_OPS_LOGS_SUITE_API_EXCHANGE_PATH` (default
-   `/suite-api/api/auth/token/exchange`, on `VCF_OPS_LOGS_SUITE_API_BASE_URL`
-   — defaults to `VCF_OPS_LOGS_BASE_URL`) with `Authorization: Bearer
-   <access_token>` and body `{"serviceKeys": ["ops-li"]}`, returning a
-   component **JWT**.
+   `/suite-api/api/auth/token/exchange`, on `VCF_OPS_LOGS_SUITE_API_BASE_URL`)
+   with `Authorization: Bearer <access_token>` and body `{"serviceKeys":
+   ["ops-li"]}`, returning a component **JWT**.
+
+   **Set `VCF_OPS_LOGS_SUITE_API_BASE_URL` explicitly** to your VCF
+   Operations *manager* host. It defaults to `VCF_OPS_LOGS_BASE_URL`, but
+   that's commonly wrong once you point `VCF_OPS_LOGS_BASE_URL` at a
+   dedicated logs appliance — this exchange then `302`s to a login page
+   instead of returning a token (surfaced as a clear `VCFOpsLogsAPIError`
+   now, not a raw JSON-decode crash — see the `>=300` check in
+   `_parse_response`).
 4. Both are sent on every actual log query — `Authorization: Bearer
    <access_token>` *and* `X-JWT-Token: <jwt>` — cached, and both
    transparently re-exchanged once if a query comes back `401`.
