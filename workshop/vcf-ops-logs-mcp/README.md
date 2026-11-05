@@ -70,31 +70,41 @@ port"` instead of returning results, so don't trust the "deprecated"
 label on this deployment. A `query` is one DSL fragment:
 
 ```json
-{"match_phrase": {"originalText": "error"}}
+{"match_phrase": {"text": "error"}}
 ```
 
 or nested via `bool`:
 
 ```json
 {"bool": {"must": [
-  {"match_phrase": {"originalText": "panic"}},
+  {"match_phrase": {"text": "panic"}},
   {"term": {"incomingAddress": "10.0.0.5"}}
 ]}}
 ```
 
 Supported leaf types (per the `Query` schema): `bool` (`must`/`should`/
 `must_not`/`filter`, each a list of fragments), `match_phrase`, `term`,
-`terms`, `range` (`gte`/`gt`/`lte`/`lt` — typed as **strings**, not numbers),
-`exists` (`{"field": name}`), `prefix`, `regexp`, `match_all`. Every tool
-call ANDs your query with a `range` on `logTimestamp` for the `since_minutes`
-window (`client.py`'s `with_time_range`) — don't add your own timestamp
-filter on top of it.
+`terms`, `range`, `exists` (`{"field": name}`), `prefix`, `regexp`,
+`match_all`. Every tool call ANDs your query with a `range` on `timestamp`
+for the `since_minutes` window (`client.py`'s `with_time_range`) — don't
+add your own timestamp filter on top of it.
 
-The two field names used here are confirmed from the API's `MessageContent`
-schema: `originalText` holds the raw log line, `logTimestamp` is the log's
-own epoch-millisecond timestamp (as opposed to `ingestTimestamp`, when it
-was received). `extract_records` flattens each hit's `msgContent` down to
-that flat field map for you.
+**Two field-name/type gotchas confirmed from a real request body captured
+in the live log-search UI's own network traffic** (not from the public API
+docs, which get both of these wrong):
+
+- Query/filter against `text` (an analyzed field) and `timestamp` — *not*
+  `originalText`/`logTimestamp`, which are the names those same values come
+  back under in *results*. `client.py` has both: `TEXT_FIELD`/`TIMESTAMP_FIELD`
+  for building queries, `RESULT_TEXT_FIELD` for reading a hit's raw text
+  (used in `monitor.py`'s sample extraction).
+- `range` values (`gte`/`lte`) are raw JSON numbers (epoch milliseconds),
+  not strings — the `RangeQueryValue` schema docs claim string-typed, which
+  doesn't match what the real UI sends or what this deployment accepts.
+
+`extract_records` flattens each hit's `msgContent` down to a flat field map
+(`originalText`, `logTimestamp`, `ingestTimestamp`, `incomingAddress`,
+`fields`) for you.
 
 `total_matched` reads `events.total` from the response — the **true** total
 match count, independent of `size` — so `count_errors` reports exact

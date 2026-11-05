@@ -94,10 +94,10 @@ async def query_logs(
         Field(
             description="One Elasticsearch-style query DSL fragment, e.g. "
             '{"term": {"incomingAddress": "10.0.0.5"}} or '
-            '{"bool": {"must": [{"match_phrase": {"originalText": "panic"}}]}}. '
+            '{"bool": {"must": [{"match_phrase": {"text": "panic"}}]}}. '
             "Supported leaf types: bool (must/should/must_not/filter, each a list of "
-            "these fragments), match_phrase, term, terms, range (gte/gt/lte/lt as "
-            "strings), exists ({\"field\": name}), prefix, regexp, match_all. "
+            "these fragments), match_phrase, term, terms, range (gte/gt/lte/lt), "
+            "exists ({\"field\": name}), prefix, regexp, match_all. "
             "Use list_log_fields to discover field names. Automatically ANDed with "
             "the since_minutes time range — do not add your own timestamp range."
         ),

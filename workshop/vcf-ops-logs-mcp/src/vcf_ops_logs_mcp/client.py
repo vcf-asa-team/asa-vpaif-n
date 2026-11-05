@@ -46,7 +46,7 @@ class VCFOpsLogsClient:
 
     A query's `query` field is one Elasticsearch-DSL fragment — bool/match_phrase
     /term/terms/range/exists/match_all/prefix/regexp, e.g.
-    {"match_phrase": {"originalText": "error"}} — see build_time_range_query
+    {"match_phrase": {"text": "error"}} — see build_time_range_query
     and the search_logs/query_logs tools in server.py for how time bounding
     is ANDed in via a bool.must.
     """
@@ -196,12 +196,18 @@ def _extract_error_detail(response: httpx.Response) -> str:
     return str(body)
 
 
-# Confirmed field names (VCF 9.1.1 Log Management API data structures):
-# MessageContent.originalText holds the raw log line; MessageContent.logTimestamp
-# is the log's own epoch-millisecond timestamp (vs. ingestTimestamp, when it was
-# received). RangeQueryValue's gte/gt/lte/lt are typed as strings, not numbers.
-TEXT_FIELD = "originalText"
-TIMESTAMP_FIELD = "logTimestamp"
+# Confirmed from a real request body captured in the VCF Operations
+# log-search UI's own network traffic (not from the public API docs, which
+# got both of these wrong): the *queryable* text field is "text" (a
+# separate, analyzed field used for match_phrase/term/etc.) while the raw
+# stored line comes back as MessageContent.originalText in results — hence
+# two different constants. Likewise, range queries filter on "timestamp"
+# (an indexed field), not the "logTimestamp"/"ingestTimestamp" fields that
+# show up in MessageContent results. Range values are raw numbers in the
+# real request, not the strings the RangeQueryValue schema docs claim.
+TEXT_FIELD = "text"
+RESULT_TEXT_FIELD = "originalText"
+TIMESTAMP_FIELD = "timestamp"
 
 
 def time_range_ms(since_minutes: float, *, until_minutes_ago: float = 0.0) -> tuple[int, int]:
@@ -212,7 +218,7 @@ def time_range_ms(since_minutes: float, *, until_minutes_ago: float = 0.0) -> tu
 
 
 def build_time_range_query(start_ms: int, end_ms: int) -> dict[str, Any]:
-    return {"range": {TIMESTAMP_FIELD: {"gte": str(start_ms), "lte": str(end_ms)}}}
+    return {"range": {TIMESTAMP_FIELD: {"gte": start_ms, "lte": end_ms}}}
 
 
 def with_time_range(query: dict[str, Any], start_ms: int, end_ms: int) -> dict[str, Any]:

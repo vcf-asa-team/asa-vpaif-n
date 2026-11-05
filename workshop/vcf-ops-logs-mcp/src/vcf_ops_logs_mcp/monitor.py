@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .client import (
+    RESULT_TEXT_FIELD,
     TEXT_FIELD,
     VCFOpsLogsAPIError,
     VCFOpsLogsClient,
@@ -115,7 +116,9 @@ class Monitor:
                 continue
 
             records = extract_records(result)
-            samples = [str(r.get(TEXT_FIELD, ""))[:200] for r in records[: self._config.sample_size]]
+            samples = [
+                str(r.get(RESULT_TEXT_FIELD, ""))[:200] for r in records[: self._config.sample_size]
+            ]
             self._findings.append(
                 Finding(
                     detected_at_ms=int(time.time() * 1000),
