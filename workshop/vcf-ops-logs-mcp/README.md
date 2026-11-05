@@ -9,10 +9,10 @@ that proactively watches for error patterns between queries.
 
 | Tool | Purpose |
 | --- | --- |
-| `search_logs` | Free-text search over raw log messages within a time window. |
-| `query_logs` | Structured field/operator/value query (advanced; multiple constraints are ANDed). |
-| `list_log_fields` | List field names ingested by this instance, to help build queries. |
-| `count_errors` | Count matches per error term over a time window (capped at `limit` per term). |
+| `search_logs` | Phrase search over raw log messages within a time window. |
+| `query_logs` | Raw Elasticsearch-style query-DSL search (advanced; full control over filtering). |
+| `list_log_fields` | List extracted field names ingested by this instance, to help build queries. |
+| `count_errors` | Exact matching-event totals per error term over a time window. |
 | `get_recent_findings` | Read findings already captured by the background monitor — no new query. |
 
 ## Auth: OAuth2 token exchange, not a plain bearer token
@@ -40,27 +40,49 @@ check that the token's fleet role actually grants log access.
 
 ## How queries are built
 
-Queries use the Log Insight REST API "constraint path" convention:
-`GET /api/v2/events/<field>/<op>/<value>/<field>/<op>/<value>/...`, where
-each `field/operator/value` triple is **ANDed** together server-side (there
-is no OR across constraints). Supported operators: `CONTAINS`,
-`NOT_CONTAINS`, `EQ`, `NOT_EQ`, `GT`, `GTE`, `LT`, `LTE`. Timestamps are
-epoch milliseconds. The path defaults to `/api/v2/events`
-(`VCF_OPS_LOGS_EVENTS_PATH`) — the classic standalone Log Insight API used a
-`/api/v1/...` prefix, but VCF Operations 9.1's unified gateway uses `v2`.
+VCF 9.1.1's Log Management API (`POST /api/v2/logs/search`, confirmed
+against `developer.broadcom.com/xapis/log-management-api`) is a single
+**synchronous** call using an Elasticsearch-style query DSL — no submit/poll
+cycle, no SQL. A `query` is one DSL fragment:
 
-`list_log_fields` hits `VCF_OPS_LOGS_FIELDS_PATH` (default `/api/v2/fields`),
-which is an **unconfirmed guess by analogy** with the events path, not
-something I found documented directly — if it 404s, that's the one to fix
-via env var once you find the real path in your Swagger UI.
+```json
+{"match_phrase": {"originalText": "error"}}
+```
 
-If your instance exposes a still-different query shape (VCF Operations also
-exposes a separate async query API under `/vrlic/api/v1/query/{post,get,delete}`
-that submits a query and polls for results by ID, rather than the
-synchronous `GET /api/v2/events` used here), the place to adapt is
-`client.py` (`query_events` / `_constraint_path`). Run `list_log_fields` and
-a simple `search_logs` call first to sanity-check compatibility before
-relying on this for a demo.
+or nested via `bool`:
+
+```json
+{"bool": {"must": [
+  {"match_phrase": {"originalText": "panic"}},
+  {"term": {"incomingAddress": "10.0.0.5"}}
+]}}
+```
+
+Supported leaf types (per the `Query` schema): `bool` (`must`/`should`/
+`must_not`/`filter`, each a list of fragments), `match_phrase`, `term`,
+`terms`, `range` (`gte`/`gt`/`lte`/`lt` — typed as **strings**, not numbers),
+`exists` (`{"field": name}`), `prefix`, `regexp`, `match_all`. Every tool
+call ANDs your query with a `range` on `logTimestamp` for the `since_minutes`
+window (`client.py`'s `with_time_range`) — don't add your own timestamp
+filter on top of it.
+
+The two field names used here are confirmed from the API's `MessageContent`
+schema: `originalText` holds the raw log line, `logTimestamp` is the log's
+own epoch-millisecond timestamp (as opposed to `ingestTimestamp`, when it
+was received). `extract_records` flattens each hit's `msgContent` down to
+that flat field map for you.
+
+`total_matched` reads `events.total` from the response — the **true** total
+match count, independent of `size` — so `count_errors` reports exact
+numbers by searching with `size=1` and reading that field, not an estimate
+capped by a page size. `query_logs` takes a raw DSL fragment for anything
+`search_logs` can't express; run `list_log_fields` first to see what
+extracted fields this instance actually has.
+
+If this instance exposes yet another query shape, the place to adapt is
+`client.py` (`search`, and `VCF_OPS_LOGS_SEARCH_PATH`/`FIELDS_PATH` in
+`.env.example`). Run `list_log_fields` and a simple `search_logs` call first
+to sanity-check compatibility before relying on this for a demo.
 
 ## Background monitor loop
 
@@ -164,5 +186,9 @@ an MCP tool server the same way `pais-mcp` is connected (see
   `workshop/pais-mcp/README.md`'s Notes section — same transport, same
   DNS-rebinding protection, same fix (`MCP_ENABLE_DNS_REBINDING_PROTECTION`,
   `MCP_ALLOWED_HOSTS`, `MCP_ALLOWED_ORIGINS`).
-- `count_errors` reports counts capped at `limit` per term, not a true
-  server-side aggregate — treat large numbers as "at least this many."
+- `query_logs` passes your DSL fragment straight through to the search API —
+  it's JSON, not string-interpolated SQL, so there's no escaping concern the
+  way the earlier SQL-based design had.
+- The auth flow (`VCF_OPS_LOGS_TOKEN_ENDPOINT_URL` + OAuth2 token exchange)
+  is unrelated to this API change and was confirmed working against a live
+  VCF 9.1.1 lab — see `client.py`'s `_ensure_access_token`.

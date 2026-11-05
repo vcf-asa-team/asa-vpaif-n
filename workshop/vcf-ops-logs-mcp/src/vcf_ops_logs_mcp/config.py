@@ -18,8 +18,10 @@ class VCFOpsLogsConfig:
     token_endpoint_url: str
     verify_ssl: bool = True
     timeout: float = 30.0
-    events_path: str = "/api/v2/events"
-    fields_path: str = "/api/v2/fields"
+    # VCF 9.1.1 "Log Management API": POST /api/v2/logs/search (synchronous,
+    # Elasticsearch-style query DSL) and GET /api/v2/fields/extractedFields.
+    search_path: str = "/api/v2/logs/search"
+    fields_path: str = "/api/v2/fields/extractedFields"
 
     @classmethod
     def from_env(cls) -> "VCFOpsLogsConfig":
@@ -52,7 +54,7 @@ class VCFOpsLogsConfig:
             token_endpoint_url=token_endpoint_url,
             verify_ssl=verify_ssl,
             timeout=timeout,
-            events_path=os.environ.get("VCF_OPS_LOGS_EVENTS_PATH", cls.events_path),
+            search_path=os.environ.get("VCF_OPS_LOGS_SEARCH_PATH", cls.search_path),
             fields_path=os.environ.get("VCF_OPS_LOGS_FIELDS_PATH", cls.fields_path),
         )
 
@@ -65,7 +67,6 @@ class MonitorConfig:
     error_terms: tuple[str, ...] = ("ERROR", "Exception", "CRITICAL", "FATAL")
     max_findings: int = 200
     sample_size: int = 3
-    query_limit: int = 50
 
     @classmethod
     def from_env(cls) -> "MonitorConfig":
@@ -82,7 +83,6 @@ class MonitorConfig:
             error_terms=tuple(terms) if terms else cls.error_terms,
             max_findings=int(os.environ.get("MONITOR_MAX_FINDINGS", "200")),
             sample_size=int(os.environ.get("MONITOR_SAMPLE_SIZE", "3")),
-            query_limit=int(os.environ.get("MONITOR_QUERY_LIMIT", "50")),
         )
 
 

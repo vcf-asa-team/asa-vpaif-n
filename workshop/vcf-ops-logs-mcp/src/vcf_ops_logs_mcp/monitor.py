@@ -6,7 +6,15 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
-from .client import VCFOpsLogsAPIError, VCFOpsLogsClient
+from .client import (
+    TEXT_FIELD,
+    VCFOpsLogsAPIError,
+    VCFOpsLogsClient,
+    extract_records,
+    match_phrase_query,
+    total_matched,
+    with_time_range,
+)
 from .config import MonitorConfig
 
 
@@ -90,15 +98,11 @@ class Monitor:
             return
 
         for term in self._config.error_terms:
-            constraints = [
-                ("text", "CONTAINS", term),
-                ("timestamp", "GT", str(window_start_ms)),
-                ("timestamp", "LT", str(window_end_ms)),
-            ]
+            query = with_time_range(
+                match_phrase_query(TEXT_FIELD, term), window_start_ms, window_end_ms
+            )
             try:
-                result = await self._client.query_events(
-                    constraints, limit=self._config.query_limit
-                )
+                result = await self._client.search(query, size=self._config.sample_size)
             except VCFOpsLogsAPIError as exc:
                 print(
                     f"[vcf-ops-logs-mcp] monitor query for {term!r} failed "
@@ -106,23 +110,24 @@ class Monitor:
                 )
                 continue
 
-            events = result.get("events") or []
-            if not events:
+            count = total_matched(result)
+            if not count:
                 continue
 
-            samples = [str(e.get("text", ""))[:200] for e in events[: self._config.sample_size]]
+            records = extract_records(result)
+            samples = [str(r.get(TEXT_FIELD, ""))[:200] for r in records[: self._config.sample_size]]
             self._findings.append(
                 Finding(
                     detected_at_ms=int(time.time() * 1000),
                     term=term,
                     window_start_ms=window_start_ms,
                     window_end_ms=window_end_ms,
-                    match_count=len(events),
+                    match_count=count,
                     samples=samples,
                 )
             )
             print(
-                f"[vcf-ops-logs-mcp] monitor: {len(events)} new match(es) for {term!r} "
+                f"[vcf-ops-logs-mcp] monitor: {count} new match(es) for {term!r} "
                 f"between {_iso(window_start_ms)} and {_iso(window_end_ms)}"
             )
 

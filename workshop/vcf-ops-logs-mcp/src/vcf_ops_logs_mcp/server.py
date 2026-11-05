@@ -5,13 +5,22 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from mcp.server import MCPServer
 from mcp.server.mcpserver import Context
 from mcp.server.mcpserver.exceptions import ToolError
 
-from .client import VCFOpsLogsAPIError, VCFOpsLogsClient, time_range_constraints
+from .client import (
+    TEXT_FIELD,
+    VCFOpsLogsAPIError,
+    VCFOpsLogsClient,
+    extract_records,
+    match_phrase_query,
+    time_range_ms,
+    total_matched,
+    with_time_range,
+)
 from .config import MonitorConfig, VCFOpsLogsConfig
 from .monitor import Monitor
 
@@ -37,68 +46,72 @@ async def app_lifespan(server: MCPServer) -> AsyncIterator[AppContext]:
 mcp = MCPServer("vcf-ops-logs-mcp", lifespan=app_lifespan)
 
 
-class Constraint(BaseModel):
-    field: str = Field(
-        description="Log field to filter on, e.g. 'text', 'hostname', 'appname'. "
-        "Use list_log_fields to discover what this instance has ingested."
-    )
-    operator: str = Field(
-        description="One of CONTAINS, NOT_CONTAINS, EQ, NOT_EQ, GT, GTE, LT, LTE."
-    )
-    value: str = Field(description="Value to compare the field against.")
-
-
 SinceMinutesParam = Annotated[
     float,
     Field(ge=0, le=10080, description="How far back to search, in minutes (default: last hour)."),
 ]
-LimitParam = Annotated[int, Field(ge=1, le=500, description="Maximum number of events to return.")]
+SizeParam = Annotated[
+    int, Field(ge=1, le=2000, description="Maximum number of log records to return.")
+]
 
 
-async def _run_query(
-    ctx: Context[AppContext], constraints: list[tuple[str, str, str]], limit: int
+async def _run_search(
+    ctx: Context[AppContext], query: dict[str, Any], since_minutes: float, size: int
 ) -> dict[str, Any]:
+    start_ms, end_ms = time_range_ms(since_minutes)
+    bounded_query = with_time_range(query, start_ms, end_ms)
     try:
-        return await ctx.request_context.lifespan_context.logs.query_events(
-            constraints, limit=limit
-        )
+        result = await ctx.request_context.lifespan_context.logs.search(bounded_query, size=size)
     except VCFOpsLogsAPIError as exc:
         raise ToolError(
             f"VCF Operations for Logs API error ({exc.status_code}): {exc.message}"
         ) from exc
+    return {
+        "total_matched": total_matched(result),
+        "records": extract_records(result),
+        "timed_out": result.get("timedOut", False),
+    }
 
 
 @mcp.tool()
 async def search_logs(
     ctx: Context[AppContext],
     query_text: Annotated[
-        str, Field(description="Free-text term or phrase to search for in the raw log message.")
+        str, Field(description="Exact phrase to search for in the raw log message.")
     ],
     since_minutes: SinceMinutesParam = 60,
-    limit: LimitParam = 50,
+    size: SizeParam = 50,
 ) -> dict[str, Any]:
-    """Search raw log messages for a text term/phrase within a recent time window."""
-    constraints = [("text", "CONTAINS", query_text), *time_range_constraints(since_minutes)]
-    return await _run_query(ctx, constraints, limit)
+    """Search raw log messages for a phrase within a recent time window."""
+    return await _run_search(ctx, match_phrase_query(TEXT_FIELD, query_text), since_minutes, size)
 
 
 @mcp.tool()
 async def query_logs(
     ctx: Context[AppContext],
-    constraints: Annotated[
-        list[Constraint], Field(description="Field/operator/value triples, ANDed together.")
+    query: Annotated[
+        dict[str, Any],
+        Field(
+            description="One Elasticsearch-style query DSL fragment, e.g. "
+            '{"term": {"incomingAddress": "10.0.0.5"}} or '
+            '{"bool": {"must": [{"match_phrase": {"originalText": "panic"}}]}}. '
+            "Supported leaf types: bool (must/should/must_not/filter, each a list of "
+            "these fragments), match_phrase, term, terms, range (gte/gt/lte/lt as "
+            "strings), exists ({\"field\": name}), prefix, regexp, match_all. "
+            "Use list_log_fields to discover field names. Automatically ANDed with "
+            "the since_minutes time range — do not add your own timestamp range."
+        ),
     ],
     since_minutes: SinceMinutesParam = 60,
-    limit: LimitParam = 50,
+    size: SizeParam = 50,
 ) -> dict[str, Any]:
-    """Run a structured, field-level query (advanced; prefer search_logs for simple text search)."""
-    tuples = [(c.field, c.operator, c.value) for c in constraints]
-    return await _run_query(ctx, [*tuples, *time_range_constraints(since_minutes)], limit)
+    """Run a raw query-DSL log search (advanced; prefer search_logs for a simple phrase)."""
+    return await _run_search(ctx, query, since_minutes, size)
 
 
 @mcp.tool()
 async def list_log_fields(ctx: Context[AppContext]) -> dict[str, Any]:
-    """List field names known to this VCF Operations for Logs instance, to help build queries."""
+    """List extracted fields known to this VCF Operations for Logs instance."""
     try:
         return await ctx.request_context.lifespan_context.logs.list_fields()
     except VCFOpsLogsAPIError as exc:
@@ -111,7 +124,6 @@ async def list_log_fields(ctx: Context[AppContext]) -> dict[str, Any]:
 async def count_errors(
     ctx: Context[AppContext],
     since_minutes: SinceMinutesParam = 60,
-    limit: LimitParam = 200,
     error_terms: Annotated[
         list[str] | None,
         Field(
@@ -120,19 +132,13 @@ async def count_errors(
         ),
     ] = None,
 ) -> dict[str, Any]:
-    """Count matching events per error term over a time window.
-
-    Counts are capped at `limit` per term (one query per term, since the
-    query API ANDs constraints together rather than ORing them) — treat the
-    result as "at least this many", not an exact total for high-volume terms.
-    """
+    """Count exact matching-event totals per error term over a time window."""
     terms = error_terms or ctx.request_context.lifespan_context.monitor.error_terms
     counts: dict[str, int] = {}
     for term in terms:
-        constraints = [("text", "CONTAINS", term), *time_range_constraints(since_minutes)]
-        result = await _run_query(ctx, constraints, limit)
-        counts[term] = len(result.get("events") or [])
-    return {"since_minutes": since_minutes, "limit_per_term": limit, "counts": counts}
+        result = await _run_search(ctx, match_phrase_query(TEXT_FIELD, term), since_minutes, size=1)
+        counts[term] = result["total_matched"]
+    return {"since_minutes": since_minutes, "counts": counts}
 
 
 @mcp.tool()
