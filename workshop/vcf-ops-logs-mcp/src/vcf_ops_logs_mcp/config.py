@@ -30,10 +30,11 @@ class VCFOpsLogsConfig:
     # generally, but the Log Management API itself is gated by a second,
     # component-scoped JWT: exchange the access token for one via
     # suite_api_exchange_path, scoped to ops_li_service_key, then send it as
-    # "Authorization: Bearer <jwt>" on search/fields calls (confirmed from a
-    # browser capture of the live log-search UI). suite_api_base_url defaults
-    # to base_url but is overridable since this exchange may live on a
-    # different host (e.g. the core VCF Operations manager, not the logs
+    # "X-JWT-Token" on search/fields calls — matches the public docs'
+    # security schema, confirmed working end-to-end against a live
+    # deployment. suite_api_base_url defaults to base_url but is overridable
+    # since this exchange may live on a different host (e.g. the core VCF
+    # Operations manager, not the logs
     # appliance) — it does on this deployment.
     suite_api_base_url: str = ""
     suite_api_exchange_path: str = "/suite-api/api/auth/token/exchange"

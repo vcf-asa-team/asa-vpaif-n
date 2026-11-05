@@ -36,12 +36,13 @@ class VCFOpsLogsClient:
        <access_token>" and body {"serviceKeys": [config.ops_li_service_key]},
        returning a component JWT.
     3. Only that component JWT is sent on actual log queries, as
-       "Authorization: Bearer <ops_li_jwt>" — confirmed from the live VCF
-       Operations log-search UI's own network traffic. (The API docs'
-       security schema instead says to use an "X-JWT-Token" header and the
-       path "/api/v2/logs/search" — neither matched this deployment; both
-       the header name and the path here come from the browser capture, not
-       the docs.) Cached, and re-exchanged once automatically on a 401.
+       "X-JWT-Token: <ops_li_jwt>" — matching the API docs' security schema
+       after all. The thing the docs got wrong (confirmed end-to-end
+       against a live deployment) is the *path*: "/api/v2/logs/search"
+       (what the docs call current/non-deprecated) 403s here with "This API
+       endpoint is not available on this port"; "/api/v2/search" (what the
+       docs call deprecated) is what actually works. Cached, and
+       re-exchanged once automatically on a 401.
 
     A query's `query` field is one Elasticsearch-DSL fragment — bool/match_phrase
     /term/terms/range/exists/match_all/prefix/regexp, e.g.
@@ -82,13 +83,14 @@ class VCFOpsLogsClient:
         return await self._authed_request("GET", self._config.fields_path)
 
     async def _authed_request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        # Confirmed from the live VCF Operations log-search UI's own network
-        # traffic: it sends the ops-li component JWT as "Authorization:
-        # Bearer <jwt>", not "X-JWT-Token" (that header name came from the
-        # API docs' security schema, which doesn't match this deployment).
+        # Confirmed working end-to-end: the ops-li component JWT goes in
+        # "X-JWT-Token" (matching the docs' security schema after all), on
+        # path /api/v2/search (NOT /api/v2/logs/search, which 403s here —
+        # that mismatch, not the header, was the actual cause of the
+        # earlier 403s this header name took the blame for).
         ops_li_jwt = await self._ensure_ops_li_jwt()
         response = await self._send(
-            method, path, headers={"Authorization": f"Bearer {ops_li_jwt}"}, **kwargs
+            method, path, headers={"X-JWT-Token": ops_li_jwt}, **kwargs
         )
         if response.status_code == 401:
             # JWT may have expired; re-exchange both once and retry.
@@ -96,7 +98,7 @@ class VCFOpsLogsClient:
             self._ops_li_jwt = None
             ops_li_jwt = await self._ensure_ops_li_jwt()
             response = await self._send(
-                method, path, headers={"Authorization": f"Bearer {ops_li_jwt}"}, **kwargs
+                method, path, headers={"X-JWT-Token": ops_li_jwt}, **kwargs
             )
         return _parse_response(response)
 

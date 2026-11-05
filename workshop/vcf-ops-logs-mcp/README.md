@@ -49,13 +49,9 @@ component-scoped* JWT on top of that. Both are needed:
    `_parse_response`). The response's token comes back under `jwtToken`
    (confirmed from a live lab), which `_extract_token` checks for alongside
    the more generic `token`/`access_token`/`jwt`/`accessToken`/`value`.
-4. Only that component JWT is sent on actual log queries, as
-   `Authorization: Bearer <jwt>` — confirmed by capturing the live VCF
-   Operations log-search UI's own network traffic in a browser. The API
-   docs' security schema instead says to use an `X-JWT-Token` header, and a
-   path of `/api/v2/logs/search` (see below) — neither matched this
-   deployment; trust the browser capture over the docs here. Both tokens
-   are cached and re-exchanged once automatically on a `401`.
+4. Only that component JWT is sent on actual log queries, as `X-JWT-Token:
+   <jwt>` — this part matches the API docs' security schema exactly. Both
+   tokens are cached and re-exchanged once automatically on a `401`.
 
 See `client.py`'s `_ensure_access_token`/`_ensure_ops_li_jwt` for this flow.
 Fleet API tokens only inherit permissions from your **VCF Fleet role** (e.g.
@@ -64,14 +60,14 @@ check that the token's fleet role actually grants log access.
 
 ## How queries are built
 
-VCF 9.1.1's Log Management API (`POST /api/v2/search` — confirmed by
-capturing the live log-search UI's own traffic; the public docs at
-`developer.broadcom.com/xapis/log-management-api` call this path
-"deprecated" and instead document `/api/v2/logs/search` as current, which on
-this deployment returned `403 "This API endpoint is not available on this
-port"` instead of real results) is a single **synchronous** call using an
-Elasticsearch-style query DSL — no submit/poll cycle, no SQL. A `query` is
-one DSL fragment:
+VCF 9.1.1's Log Management API (`POST /api/v2/search`, confirmed working
+end-to-end against a live deployment) is a single **synchronous** call
+using an Elasticsearch-style query DSL — no submit/poll cycle, no SQL. The
+public docs at `developer.broadcom.com/xapis/log-management-api` call this
+path "deprecated" and instead document `/api/v2/logs/search` as current —
+that one 403s here with `"This API endpoint is not available on this
+port"` instead of returning results, so don't trust the "deprecated"
+label on this deployment. A `query` is one DSL fragment:
 
 ```json
 {"match_phrase": {"originalText": "error"}}
@@ -149,7 +145,7 @@ cp .env.example .env
 ```
 
 `VCF_OPS_LOGS_API_TOKEN` is exchanged for a short-lived access token before
-use — see "Auth: OAuth2 token exchange, not a plain bearer token" above. Set
+use — see "Auth: two token exchanges, not a plain bearer token" above. Set
 `VCF_OPS_LOGS_VERIFY_SSL=false` if the instance uses a self-signed lab
 certificate.
 
@@ -215,8 +211,8 @@ an MCP tool server the same way `pais-mcp` is connected (see
   DNS-rebinding protection, same fix (`MCP_ENABLE_DNS_REBINDING_PROTECTION`,
   `MCP_ALLOWED_HOSTS`, `MCP_ALLOWED_ORIGINS`).
 - `query_logs` passes your DSL fragment straight through to the search API —
-  it's JSON, not string-interpolated SQL, so there's no escaping concern the
-  way the earlier SQL-based design had.
-- The auth flow (`VCF_OPS_LOGS_TOKEN_ENDPOINT_URL` + OAuth2 token exchange)
-  is unrelated to this API change and was confirmed working against a live
-  VCF 9.1.1 lab — see `client.py`'s `_ensure_access_token`.
+  it's JSON, so there's no string-escaping concern to worry about.
+- Everything in this README — both auth exchanges, the `/api/v2/search`
+  path, the `X-JWT-Token` header, and the `MessageContent` field names — is
+  confirmed end-to-end against a live VCF 9.1.1 deployment, not just the
+  public API docs (which, as noted above, get the path wrong).
