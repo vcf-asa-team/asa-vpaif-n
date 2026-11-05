@@ -22,6 +22,16 @@ class VCFOpsLogsConfig:
     # Elasticsearch-style query DSL) and GET /api/v2/fields/extractedFields.
     search_path: str = "/api/v2/logs/search"
     fields_path: str = "/api/v2/fields/extractedFields"
+    # The fleet-wide access token (above) authenticates you to VCF Operations
+    # generally, but the Log Management API itself is gated by a second,
+    # component-scoped JWT: exchange the access token for one via
+    # suite_api_exchange_path, scoped to ops_li_service_key, then send it as
+    # "X-JWT-Token" on search/fields calls. suite_api_base_url defaults to
+    # base_url but is overridable since this exchange may live on a different
+    # host (e.g. the core VCF Operations manager, not the logs appliance).
+    suite_api_base_url: str = ""
+    suite_api_exchange_path: str = "/suite-api/api/auth/token/exchange"
+    ops_li_service_key: str = "ops-li"
 
     @classmethod
     def from_env(cls) -> "VCFOpsLogsConfig":
@@ -47,15 +57,25 @@ class VCFOpsLogsConfig:
             "no",
         )
         timeout = float(os.environ.get("VCF_OPS_LOGS_TIMEOUT_SECONDS", "30"))
+        base_url = base_url.rstrip("/")
 
         return cls(
-            base_url=base_url.rstrip("/"),
+            base_url=base_url,
             api_token=api_token,
             token_endpoint_url=token_endpoint_url,
             verify_ssl=verify_ssl,
             timeout=timeout,
             search_path=os.environ.get("VCF_OPS_LOGS_SEARCH_PATH", cls.search_path),
             fields_path=os.environ.get("VCF_OPS_LOGS_FIELDS_PATH", cls.fields_path),
+            suite_api_base_url=os.environ.get("VCF_OPS_LOGS_SUITE_API_BASE_URL", base_url).rstrip(
+                "/"
+            ),
+            suite_api_exchange_path=os.environ.get(
+                "VCF_OPS_LOGS_SUITE_API_EXCHANGE_PATH", cls.suite_api_exchange_path
+            ),
+            ops_li_service_key=os.environ.get(
+                "VCF_OPS_LOGS_OPS_LI_SERVICE_KEY", cls.ops_li_service_key
+            ),
         )
 
 

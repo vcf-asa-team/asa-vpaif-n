@@ -15,28 +15,40 @@ that proactively watches for error patterns between queries.
 | `count_errors` | Exact matching-event totals per error term over a time window. |
 | `get_recent_findings` | Read findings already captured by the background monitor — no new query. |
 
-## Auth: OAuth2 token exchange, not a plain bearer token
+## Auth: two token exchanges, not a plain bearer token
 
 VCF 9.1's fleet-wide API tokens (generated on VCF Operations' "Your API
-Tokens" page) aren't sent directly on log queries. Instead:
+Tokens" page) aren't sent directly on log queries, and getting past one
+exchange isn't enough — the Log Management API is gated by a *second,
+component-scoped* JWT on top of that. Both are needed:
 
 1. Generate a token on that page and copy its **Token Endpoint URL** —
    this points at your SSO/identity-broker host
    (`https://<sso-fqdn>/acs/t/CUSTOMER/token`), which is a **different host**
    from the Operations-for-Logs appliance (`VCF_OPS_LOGS_BASE_URL`). Put it
    in `VCF_OPS_LOGS_TOKEN_ENDPOINT_URL`.
-2. The client exchanges `VCF_OPS_LOGS_API_TOKEN` for a short-lived bearer
-   access token via a `POST` to that endpoint, form-urlencoded:
+2. The client exchanges `VCF_OPS_LOGS_API_TOKEN` for a short-lived fleet-wide
+   **access token** via a `POST` to that endpoint, form-urlencoded:
    `grant_type=urn:custom:vcf:params:oauth:grant-type:api-token&api_token=<token>`.
-3. The `access_token` from that response is cached and sent as
-   `Authorization: Bearer <access_token>` on every actual log query, and
-   transparently re-exchanged if a query comes back `401` — the access token
-   is short-lived (the token page showed a 30-minute TTL).
+   This authenticates you to VCF Operations generally — but calling the Log
+   Management API with only this token 403s with *"This API endpoint is not
+   available on this port"*.
+3. That access token is used to run a **second exchange**, scoped to the
+   `ops-li` (Operations for Logs) component: `POST
+   VCF_OPS_LOGS_SUITE_API_EXCHANGE_PATH` (default
+   `/suite-api/api/auth/token/exchange`, on `VCF_OPS_LOGS_SUITE_API_BASE_URL`
+   — defaults to `VCF_OPS_LOGS_BASE_URL`) with `Authorization: Bearer
+   <access_token>` and body `{"serviceKeys": ["ops-li"]}`, returning a
+   component **JWT**.
+4. Both are sent on every actual log query — `Authorization: Bearer
+   <access_token>` *and* `X-JWT-Token: <jwt>` — cached, and both
+   transparently re-exchanged once if a query comes back `401`.
 
-See `client.py`'s `_ensure_access_token` for this flow. Fleet API tokens only
-inherit permissions from your **VCF Fleet role** (e.g. "VCF Administrator"),
-not component-level roles — if queries still 401 after fixing the endpoint,
-check that the token's fleet role actually grants log access.
+See `client.py`'s `_ensure_tokens`/`_ensure_access_token`/`_ensure_ops_li_jwt`
+for this flow. Fleet API tokens only inherit permissions from your **VCF
+Fleet role** (e.g. "VCF Administrator") — if queries still fail after both
+exchanges succeed, check that the token's fleet role actually grants log
+access.
 
 ## How queries are built
 

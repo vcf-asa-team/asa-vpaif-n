@@ -25,13 +25,22 @@ class VCFOpsLogsClient:
     (POST /api/v2/logs/search), an Elasticsearch-style query DSL — a single
     synchronous call, no submit/poll cycle.
 
-    Auth is two-step, per VCF 9.1's fleet-wide API token model: the long-lived
-    api_token is first exchanged for a short-lived bearer access token via an
-    OAuth2-style "api-token" grant against config.token_endpoint_url (POST,
-    form-urlencoded, on a *different host* than base_url — the SSO/identity
-    broker, not the Operations-for-Logs appliance). That access token is then
-    sent as "Authorization: Bearer <token>" on actual queries, cached, and
-    re-exchanged automatically on a 401 (it's short-lived — ~30 minutes).
+    Auth is three-step:
+    1. The long-lived api_token is exchanged for a short-lived fleet-wide
+       bearer access token via an OAuth2-style "api-token" grant against
+       config.token_endpoint_url (POST, form-urlencoded, on a *different
+       host* than base_url — the SSO/identity broker).
+    2. That access token authenticates a second exchange, scoped to the
+       "ops-li" (Operations for Logs) component: POST
+       config.suite_api_exchange_path with "Authorization: Bearer
+       <access_token>" and body {"serviceKeys": [config.ops_li_service_key]},
+       returning a component JWT. The Log Management API is gated on this
+       JWT specifically — without it, calls 403 with "This API endpoint is
+       not available on this port" even though the fleet access token alone
+       authenticates fine.
+    3. Both tokens are sent on every actual log query: "Authorization:
+       Bearer <access_token>" and "X-JWT-Token: <ops_li_jwt>". Both are
+       cached and re-exchanged once automatically on a 401.
 
     A query's `query` field is one Elasticsearch-DSL fragment — bool/match_phrase
     /term/terms/range/exists/match_all/prefix/regexp, e.g.
@@ -49,6 +58,7 @@ class VCFOpsLogsClient:
             timeout=config.timeout,
         )
         self._access_token: str | None = None
+        self._ops_li_jwt: str | None = None
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -71,18 +81,22 @@ class VCFOpsLogsClient:
         return await self._authed_request("GET", self._config.fields_path)
 
     async def _authed_request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        token = await self._ensure_access_token()
-        response = await self._send(
-            method, path, headers={"Authorization": f"Bearer {token}"}, **kwargs
-        )
+        access_token, ops_li_jwt = await self._ensure_tokens()
+        response = await self._send(method, path, headers=_auth_headers(access_token, ops_li_jwt), **kwargs)
         if response.status_code == 401:
-            # Access token may have expired (~30 min TTL); re-exchange once and retry.
+            # Either token may have expired; re-exchange both once and retry.
             self._access_token = None
-            token = await self._ensure_access_token()
+            self._ops_li_jwt = None
+            access_token, ops_li_jwt = await self._ensure_tokens()
             response = await self._send(
-                method, path, headers={"Authorization": f"Bearer {token}"}, **kwargs
+                method, path, headers=_auth_headers(access_token, ops_li_jwt), **kwargs
             )
         return _parse_response(response)
+
+    async def _ensure_tokens(self) -> tuple[str, str]:
+        access_token = await self._ensure_access_token()
+        ops_li_jwt = await self._ensure_ops_li_jwt(access_token)
+        return access_token, ops_li_jwt
 
     async def _ensure_access_token(self) -> str:
         if self._access_token is not None:
@@ -108,6 +122,31 @@ class VCFOpsLogsClient:
         self._access_token = token
         return token
 
+    async def _ensure_ops_li_jwt(self, access_token: str) -> str:
+        if self._ops_li_jwt is not None:
+            return self._ops_li_jwt
+
+        url = self._config.suite_api_base_url + self._config.suite_api_exchange_path
+        response = await self._send(
+            "POST",
+            url,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            json={"serviceKeys": [self._config.ops_li_service_key]},
+        )
+        body = _parse_response(response)
+        jwt = _extract_token(body)
+        if not jwt:
+            raise VCFOpsLogsAPIError(
+                response.status_code,
+                f"ops-li token exchange at {url} did not return a recognizable token "
+                f"field; response was: {body!r}",
+            )
+        self._ops_li_jwt = jwt
+        return jwt
+
     async def _send(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
             return await self._client.request(method, path, **kwargs)
@@ -115,6 +154,10 @@ class VCFOpsLogsClient:
             raise VCFOpsLogsAPIError(
                 0, f"Failed to reach VCF Operations for Logs API at {path}: {exc}"
             ) from exc
+
+
+def _auth_headers(access_token: str, ops_li_jwt: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {access_token}", "X-JWT-Token": ops_li_jwt}
 
 
 def _parse_response(response: httpx.Response) -> dict[str, Any]:
