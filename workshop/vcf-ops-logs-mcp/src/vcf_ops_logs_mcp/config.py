@@ -18,17 +18,23 @@ class VCFOpsLogsConfig:
     token_endpoint_url: str
     verify_ssl: bool = True
     timeout: float = 30.0
-    # VCF 9.1.1 "Log Management API": POST /api/v2/logs/search (synchronous,
-    # Elasticsearch-style query DSL) and GET /api/v2/fields/extractedFields.
-    search_path: str = "/api/v2/logs/search"
+    # VCF 9.1.1 "Log Management API": synchronous, Elasticsearch-style query
+    # DSL. /api/v2/search (confirmed via browser capture of the live
+    # VCF Operations log-search UI) rather than /api/v2/logs/search (what
+    # the public API docs call the current, non-deprecated path — doesn't
+    # match this deployment). fields_path is unconfirmed; same docs mismatch
+    # risk may apply there too.
+    search_path: str = "/api/v2/search"
     fields_path: str = "/api/v2/fields/extractedFields"
     # The fleet-wide access token (above) authenticates you to VCF Operations
     # generally, but the Log Management API itself is gated by a second,
     # component-scoped JWT: exchange the access token for one via
     # suite_api_exchange_path, scoped to ops_li_service_key, then send it as
-    # "X-JWT-Token" on search/fields calls. suite_api_base_url defaults to
-    # base_url but is overridable since this exchange may live on a different
-    # host (e.g. the core VCF Operations manager, not the logs appliance).
+    # "Authorization: Bearer <jwt>" on search/fields calls (confirmed from a
+    # browser capture of the live log-search UI). suite_api_base_url defaults
+    # to base_url but is overridable since this exchange may live on a
+    # different host (e.g. the core VCF Operations manager, not the logs
+    # appliance) — it does on this deployment.
     suite_api_base_url: str = ""
     suite_api_exchange_path: str = "/suite-api/api/auth/token/exchange"
     ops_li_service_key: str = "ops-li"

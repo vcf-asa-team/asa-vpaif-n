@@ -49,26 +49,29 @@ component-scoped* JWT on top of that. Both are needed:
    `_parse_response`). The response's token comes back under `jwtToken`
    (confirmed from a live lab), which `_extract_token` checks for alongside
    the more generic `token`/`access_token`/`jwt`/`accessToken`/`value`.
-4. Only that component JWT is sent on actual log queries, as `X-JWT-Token:
-   <jwt>` — the only header the API's security schema documents as
-   required. Sending the fleet `access_token` too (as `Authorization:
-   Bearer`) turned out to cause a `403`, presumably because that token
-   isn't valid/scoped on the logs host and the gateway rejects the request
-   over *any* invalid header rather than ignoring it. Both tokens are
-   cached and re-exchanged once automatically on a `401`.
+4. Only that component JWT is sent on actual log queries, as
+   `Authorization: Bearer <jwt>` — confirmed by capturing the live VCF
+   Operations log-search UI's own network traffic in a browser. The API
+   docs' security schema instead says to use an `X-JWT-Token` header, and a
+   path of `/api/v2/logs/search` (see below) — neither matched this
+   deployment; trust the browser capture over the docs here. Both tokens
+   are cached and re-exchanged once automatically on a `401`.
 
-See `client.py`'s `_ensure_tokens`/`_ensure_access_token`/`_ensure_ops_li_jwt`
-for this flow. Fleet API tokens only inherit permissions from your **VCF
-Fleet role** (e.g. "VCF Administrator") — if queries still fail after both
-exchanges succeed, check that the token's fleet role actually grants log
-access.
+See `client.py`'s `_ensure_access_token`/`_ensure_ops_li_jwt` for this flow.
+Fleet API tokens only inherit permissions from your **VCF Fleet role** (e.g.
+"VCF Administrator") — if queries still fail after both exchanges succeed,
+check that the token's fleet role actually grants log access.
 
 ## How queries are built
 
-VCF 9.1.1's Log Management API (`POST /api/v2/logs/search`, confirmed
-against `developer.broadcom.com/xapis/log-management-api`) is a single
-**synchronous** call using an Elasticsearch-style query DSL — no submit/poll
-cycle, no SQL. A `query` is one DSL fragment:
+VCF 9.1.1's Log Management API (`POST /api/v2/search` — confirmed by
+capturing the live log-search UI's own traffic; the public docs at
+`developer.broadcom.com/xapis/log-management-api` call this path
+"deprecated" and instead document `/api/v2/logs/search` as current, which on
+this deployment returned `403 "This API endpoint is not available on this
+port"` instead of real results) is a single **synchronous** call using an
+Elasticsearch-style query DSL — no submit/poll cycle, no SQL. A `query` is
+one DSL fragment:
 
 ```json
 {"match_phrase": {"originalText": "error"}}

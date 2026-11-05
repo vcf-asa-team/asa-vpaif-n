@@ -22,7 +22,7 @@ _API_TOKEN_GRANT_TYPE = "urn:custom:vcf:params:oauth:grant-type:api-token"
 
 class VCFOpsLogsClient:
     """Thin async HTTP client for VCF 9.1.1's Log Management API
-    (POST /api/v2/logs/search), an Elasticsearch-style query DSL — a single
+    (POST /api/v2/search), an Elasticsearch-style query DSL — a single
     synchronous call, no submit/poll cycle.
 
     Auth is three-step:
@@ -34,18 +34,14 @@ class VCFOpsLogsClient:
        "ops-li" (Operations for Logs) component: POST
        config.suite_api_exchange_path with "Authorization: Bearer
        <access_token>" and body {"serviceKeys": [config.ops_li_service_key]},
-       returning a component JWT. The Log Management API is gated on this
-       JWT specifically — without it, calls 403 with "This API endpoint is
-       not available on this port" even though the fleet access token alone
-       authenticates fine.
+       returning a component JWT.
     3. Only that component JWT is sent on actual log queries, as
-       "X-JWT-Token: <ops_li_jwt>" — the only header the Log Management
-       API's security schema documents as required. Sending the fleet
-       access_token *too* (as "Authorization: Bearer") turned out to cause
-       a 403, presumably because that token isn't valid/scoped on the logs
-       host, and the gateway rejects the request over any invalid header
-       rather than just ignoring it. Both tokens are cached and
-       re-exchanged once automatically on a 401.
+       "Authorization: Bearer <ops_li_jwt>" — confirmed from the live VCF
+       Operations log-search UI's own network traffic. (The API docs'
+       security schema instead says to use an "X-JWT-Token" header and the
+       path "/api/v2/logs/search" — neither matched this deployment; both
+       the header name and the path here come from the browser capture, not
+       the docs.) Cached, and re-exchanged once automatically on a 401.
 
     A query's `query` field is one Elasticsearch-DSL fragment — bool/match_phrase
     /term/terms/range/exists/match_all/prefix/regexp, e.g.
@@ -86,14 +82,13 @@ class VCFOpsLogsClient:
         return await self._authed_request("GET", self._config.fields_path)
 
     async def _authed_request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        # Only X-JWT-Token is sent here — that's the only header the Log
-        # Management API's security schema documents as required. The
-        # access_token is still needed to *obtain* this JWT (see
-        # _ensure_ops_li_jwt), just not to call the API itself; sending it
-        # anyway was in fact the cause of the 403s below.
+        # Confirmed from the live VCF Operations log-search UI's own network
+        # traffic: it sends the ops-li component JWT as "Authorization:
+        # Bearer <jwt>", not "X-JWT-Token" (that header name came from the
+        # API docs' security schema, which doesn't match this deployment).
         ops_li_jwt = await self._ensure_ops_li_jwt()
         response = await self._send(
-            method, path, headers={"X-JWT-Token": ops_li_jwt}, **kwargs
+            method, path, headers={"Authorization": f"Bearer {ops_li_jwt}"}, **kwargs
         )
         if response.status_code == 401:
             # JWT may have expired; re-exchange both once and retry.
@@ -101,7 +96,7 @@ class VCFOpsLogsClient:
             self._ops_li_jwt = None
             ops_li_jwt = await self._ensure_ops_li_jwt()
             response = await self._send(
-                method, path, headers={"X-JWT-Token": ops_li_jwt}, **kwargs
+                method, path, headers={"Authorization": f"Bearer {ops_li_jwt}"}, **kwargs
             )
         return _parse_response(response)
 
