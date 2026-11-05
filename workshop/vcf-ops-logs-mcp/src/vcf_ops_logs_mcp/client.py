@@ -172,7 +172,7 @@ def _parse_response(response: httpx.Response) -> dict[str, Any]:
 
 
 def _extract_token(body: dict[str, Any]) -> str | None:
-    for key in ("token", "access_token", "jwt", "accessToken", "value"):
+    for key in ("token", "access_token", "jwt", "jwtToken", "accessToken", "value"):
         value = body.get(key)
         if isinstance(value, str) and value:
             return value
