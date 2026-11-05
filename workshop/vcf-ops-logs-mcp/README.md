@@ -46,10 +46,16 @@ component-scoped* JWT on top of that. Both are needed:
    dedicated logs appliance — this exchange then `302`s to a login page
    instead of returning a token (surfaced as a clear `VCFOpsLogsAPIError`
    now, not a raw JSON-decode crash — see the `>=300` check in
-   `_parse_response`).
-4. Both are sent on every actual log query — `Authorization: Bearer
-   <access_token>` *and* `X-JWT-Token: <jwt>` — cached, and both
-   transparently re-exchanged once if a query comes back `401`.
+   `_parse_response`). The response's token comes back under `jwtToken`
+   (confirmed from a live lab), which `_extract_token` checks for alongside
+   the more generic `token`/`access_token`/`jwt`/`accessToken`/`value`.
+4. Only that component JWT is sent on actual log queries, as `X-JWT-Token:
+   <jwt>` — the only header the API's security schema documents as
+   required. Sending the fleet `access_token` too (as `Authorization:
+   Bearer`) turned out to cause a `403`, presumably because that token
+   isn't valid/scoped on the logs host and the gateway rejects the request
+   over *any* invalid header rather than ignoring it. Both tokens are
+   cached and re-exchanged once automatically on a `401`.
 
 See `client.py`'s `_ensure_tokens`/`_ensure_access_token`/`_ensure_ops_li_jwt`
 for this flow. Fleet API tokens only inherit permissions from your **VCF
