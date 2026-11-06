@@ -15,6 +15,36 @@ that proactively watches for error patterns between queries.
 | `count_errors` | Exact matching-event totals per error term over a time window. |
 | `get_recent_findings` | Read findings already captured by the background monitor — no new query. |
 
+## Example prompts
+
+Try these against whatever chat client you've connected this MCP server to
+(Claude Desktop, Open WebUI, etc.):
+
+**On-demand search (`search_logs`)**
+- "Search the VCF Operations for Logs for any mention of 'timeout' in the last 30 minutes."
+- "Find log entries containing 'connection refused' in the last 2 hours."
+
+**Advanced filtering (`query_logs`)**
+- "Find all log entries from host 10.0.0.5 in the last hour." (exercises a `term` query on a specific field)
+- "Show me everything logged in the last 15 minutes." (`match_all` — a good sanity check)
+
+**Field discovery (`list_log_fields`)**
+- "What fields can I filter log entries on in this VCF Operations for Logs instance?"
+
+**Exact counts (`count_errors`)**
+- "How many ERROR, Exception, CRITICAL, and FATAL log lines have occurred in the last 24 hours?"
+- "Count how many times 'disk full' has appeared in the logs today." (pass a custom `error_terms` list)
+
+**Background monitor — the proactive half (`get_recent_findings`)**
+- "What has the background monitor already noticed in the logs, without me asking it to search?"
+- "Has anything matching ERROR or CRITICAL shown up in the last few minutes?"
+- A live demo sequence that shows the push/pull duality working together:
+  tell the agent *"Keep this running — I'm going to trigger something,"*
+  then actually cause an error somewhere in the environment, wait
+  roughly one `MONITOR_INTERVAL_SECONDS` (60s default), and ask *"What did
+  you just notice?"* — it should surface the finding via
+  `get_recent_findings` without you having told it what to look for.
+
 ## Auth: two token exchanges, not a plain bearer token
 
 VCF 9.1's fleet-wide API tokens (generated on VCF Operations' "Your API
@@ -139,6 +169,40 @@ disable the loop and run purely on-demand.
 The buffer is in-memory only — it resets on restart and isn't shared across
 replicas. That's fine for a single-instance workshop demo; don't rely on it
 as a durable alert store.
+
+## Triage agent system prompt
+
+Pairing this server with `workshop/pais-mcp-web-search` (its `web_search`
+and `fetch_page_content` tools) turns a chat client into a basic triage
+agent: it finds errors in your logs, then researches what they mean. Give
+the agent both MCP servers and a system prompt along these lines:
+
+```
+You are a VCF Operations triage assistant with two tool sets:
+
+1. vcf-ops-logs-mcp — search_logs, query_logs, list_log_fields,
+   count_errors, get_recent_findings. Use these to find and quantify
+   errors in VMware Cloud Foundation Operations for Logs.
+2. pais-mcp-web-search — web_search, fetch_page_content. Use these to
+   research root causes and fixes for errors you find.
+
+Workflow for "what's wrong" / "investigate errors" style questions:
+1. Start with get_recent_findings to see what the background monitor has
+   already caught; fall back to search_logs/count_errors for anything
+   outside what it's configured to watch for.
+2. For each distinct error (not every occurrence — group by message
+   pattern), extract the specific error text, code, or exception type.
+3. Use web_search for each distinct error, biasing toward VMware/Broadcom
+   official sources (search terms like "VMware Cloud Foundation Operations
+   <error text>" or "Broadcom knowledge base <error text>"). Use
+   fetch_page_content to read a promising result in full before citing it.
+4. Summarize findings as: what the error is, how many times / where it
+   occurred (from the logs), the likely cause, and a suggested fix —
+   with a link to the source you used. Say so plainly if you can't find a
+   reliable source; don't guess at a fix.
+5. Keep log data and web results clearly separated in your answer — never
+   present a web search result as something the logs themselves say.
+```
 
 ## Setup
 
