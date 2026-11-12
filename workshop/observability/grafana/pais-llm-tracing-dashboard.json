@@ -1,0 +1,412 @@
+{
+  "title": "PAIS LLM Tracing",
+  "uid": "pais-llm-tracing",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "tags": ["pais", "llm", "tracing", "tempo"],
+  "timezone": "",
+  "refresh": "30s",
+  "time": { "from": "now-3h", "to": "now" },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": { "type": "grafana", "uid": "-- Grafana --" },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "tempo",
+        "label": "Tempo datasource",
+        "current": {},
+        "refresh": 1,
+        "hide": 0
+      },
+      {
+        "name": "service_name",
+        "type": "textbox",
+        "label": "Service name (regex)",
+        "query": "pais-api.*",
+        "current": { "text": "pais-api.*", "value": "pais-api.*" },
+        "hide": 0
+      },
+      {
+        "name": "span_name",
+        "type": "textbox",
+        "label": "Span name (regex)",
+        "query": ".*",
+        "current": { "text": ".*", "value": ".*" },
+        "hide": 0
+      },
+      {
+        "name": "min_duration",
+        "type": "textbox",
+        "label": "Slow trace threshold",
+        "query": "3s",
+        "current": { "text": "3s", "value": "3s" },
+        "hide": 0
+      },
+      {
+        "name": "extra_select",
+        "type": "textbox",
+        "label": "Extra TraceQL (e.g. | select(span.gen_ai.request.model))",
+        "query": "",
+        "current": { "text": "", "value": "" },
+        "hide": 0
+      },
+      {
+        "name": "trace_id",
+        "type": "textbox",
+        "label": "Trace ID (for detail view below)",
+        "query": "",
+        "current": { "text": "", "value": "" },
+        "hide": 0
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 100,
+      "type": "row",
+      "title": "Trace Explorer",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "panels": []
+    },
+    {
+      "id": 1,
+      "type": "table",
+      "title": "Recent Traces",
+      "description": "Most recent traces matching the service/span filters, newest first. Mirrors the \"Table - Traces\" view from Grafana's Tempo search UI (Trace ID / Start time / Service / Name / Duration).",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 1 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\"}",
+          "queryType": "traceql",
+          "tableType": "traces",
+          "limit": 50,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "table",
+      "title": "Errored Traces",
+      "description": "Traces containing at least one span with an error status, matching the service/span filters.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 1 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\" && status=error}",
+          "queryType": "traceql",
+          "tableType": "traces",
+          "limit": 50,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "table",
+      "title": "Slow Traces (duration > $min_duration)",
+      "description": "Traces over the configured duration threshold. Tempo returns search results time-ordered, not duration-ordered — click the Duration column header to sort client-side.",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 10 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\" && duration > $min_duration}",
+          "queryType": "traceql",
+          "tableType": "traces",
+          "limit": 50,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 101,
+      "type": "row",
+      "title": "Trace Detail",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "panels": []
+    },
+    {
+      "id": 10,
+      "type": "traces",
+      "title": "Trace Detail ($trace_id)",
+      "description": "Paste a Trace ID from one of the tables above into the $trace_id dashboard variable to render its full span waterfall here, equivalent to opening the trace in Grafana's Trace view.",
+      "gridPos": { "h": 11, "w": 24, "x": 0, "y": 20 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "$trace_id",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 102,
+      "type": "row",
+      "title": "Span Explorer",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 },
+      "panels": []
+    },
+    {
+      "id": 20,
+      "type": "table",
+      "title": "Span Explorer",
+      "description": "Individual matching spans (not grouped by trace). Use the $extra_select variable to pull in specific span attributes as extra columns, e.g. | select(span.gen_ai.request.model, span.gen_ai.usage.output_tokens) — adjust attribute names to whatever your PAIS LLM spans actually carry; check a single span's attributes in Grafana Explore first to confirm the real keys before relying on this.",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 32 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\"}$extra_select",
+          "queryType": "traceql",
+          "tableType": "spans",
+          "limit": 50,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 103,
+      "type": "row",
+      "title": "Latency & Throughput (TraceQL metrics — requires Tempo metrics-generator local-blocks processor)",
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 42 },
+      "panels": []
+    },
+    {
+      "id": 30,
+      "type": "stat",
+      "title": "Spans (window, approx.)",
+      "description": "Sum of count_over_time() across the dashboard time range — a bucketed approximation of total matching spans, not an exact count (same caveat as Prometheus rate-window bucketing).",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 43 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "blue", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["sum"] }, "orientation": "auto", "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\"} | count_over_time()",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "stat",
+      "title": "P50 Duration",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 43 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\"} | quantile_over_time(duration, .5)",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "stat",
+      "title": "P95 Duration",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 43 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\"} | quantile_over_time(duration, .95)",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "stat",
+      "title": "P99 Duration",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 43 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 8 },
+              { "color": "red", "value": 15 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto", "colorMode": "value", "graphMode": "area", "textMode": "auto" },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\"} | quantile_over_time(duration, .99)",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "Latency Percentiles by Span Name",
+      "description": "p50/p90/p99 span duration, grouped by span name (e.g. OpenAIProvider.chat_stream vs InferenceGateway.chat_completions).",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 47 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 5, "pointSize": 5 }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\"} | quantile_over_time(duration, .5, .9, .99) by (name)",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 35,
+      "type": "timeseries",
+      "title": "Span Rate by Name",
+      "description": "Spans per second, grouped by span name. Shows relative call volume between provider/gateway spans.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 47 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10, "stacking": { "mode": "none" } }
+        },
+        "overrides": []
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\"} | rate() by (name)",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "type": "timeseries",
+      "title": "Error vs Total Span Rate",
+      "description": "Two separate rate() queries plotted together rather than a single error-rate percentage, since TraceQL metrics can't divide two queries within one expression.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 55 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 }
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "errors/s" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\" && status=error} | rate()",
+          "queryType": "traceql",
+          "legendFormat": "errors/s",
+          "refId": "A"
+        },
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\"} | rate()",
+          "queryType": "traceql",
+          "legendFormat": "total/s",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 37,
+      "type": "heatmap",
+      "title": "Duration Histogram",
+      "description": "Span duration distribution over time via TraceQL's histogram_over_time().",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 55 },
+      "datasource": { "type": "tempo", "uid": "${datasource}" },
+      "options": { "calculate": false, "color": { "mode": "scheme", "scheme": "Oranges" }, "yAxis": { "unit": "s" } },
+      "targets": [
+        {
+          "datasource": { "type": "tempo", "uid": "${datasource}" },
+          "query": "{resource.service.name=~\"$service_name\" && name=~\"$span_name\"} | histogram_over_time(duration)",
+          "queryType": "traceql",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}
