@@ -1,0 +1,145 @@
+formatVersion: 2
+inputs:
+  modelName:
+    type: string
+    title: Model
+    description: Model to deploy in Model Runtime. The GPU profile and CLI defaults for each model are applied automatically.
+    oneOf:
+      - title: Llama 3.2 3b Instruct (GPU Profile - gpu-a100-small-8c)
+        const: llama-3.2-3b-instruct
+      - title: Llama 3.1 8b Instruct (GPU Profile - gpu-a100-small-8c)
+        const: llama-3.1-8b-instruct
+      - title: Qwen 2.5 Coder 1.5b (GPU Profile - gpu-a100-small-8c)
+        const: qwen2.5-coder-1.5b
+      - title: Llama 3.2 1b Instruct CPU (GPU Profile - best-effort-large, CPU only)
+        const: llama-3.2-1b-instruct-gguf
+    default: llama-3.2-3b-instruct
+  overrideGpuProfile:
+    type: boolean
+    title: Override GPU Profile?
+    description: Check this to pick the GPU profile yourself instead of using the one recommended for the selected model.
+    default: false
+  gpuProfileOverride:
+    type: string
+    title: GPU Profile Override
+    description: Only used when "Override GPU Profile?" above is checked. Ignored otherwise.
+    oneOf:
+      - title: gpu-a100-small-8c
+        const: gpu-a100-small-8c
+      - title: gpu-h100-small-11c
+        const: gpu-h100-small-11c
+      - title: best-effort-large (CPU only)
+        const: best-effort-large
+    default: gpu-a100-small-8c
+  routingName:
+    type: string
+    title: Routing Name
+variables:
+  namespaceName: ai-workshop-b8qdl
+  modelToClassMap:
+    llama-3.2-3b-instruct:
+      modelStore: model-store/meta-llama/llama-3.2-3b-instruct:v1
+      engineImage: vllm/vllm-openai:v0.32.0
+      vmClass: gpu-a100-small-8c
+      cliArgs:
+        - '--tensor-parallel-size=1'
+        - '--disable-custom-all-reduce'
+        - '--gpu-memory-utilization=0.8'
+        - '--max-model-len=auto'
+        - '--max-num-seqs=1'
+        - '--kv-cache-dtype=fp8'
+        - '--trust-remote-code'
+        - '--tool-call-parser=llama3_json'
+        - '--enable-auto-tool-choice'
+    llama-3.1-8b-instruct:
+      modelStore: model-store/meta-llama/llama-3.1-8b-instruct-awq-int4:v1
+      engineImage: vllm/vllm-openai:v0.32.0
+      vmClass: gpu-a100-small-8c
+      cliArgs:
+        - '--tensor-parallel-size=1'
+        - '--quantization=awq'
+        - '--dtype=half'
+        - '--disable-custom-all-reduce'
+        - '--gpu-memory-utilization=0.8'
+        - '--max-model-len=6144'
+        - '--kv-cache-dtype=fp8'
+        - '--max-num-seqs=1'
+        - '--trust-remote-code'
+        - '--tool-call-parser=llama3_json'
+        - '--enable-auto-tool-choice'
+    llama-3.2-1b-instruct-gguf:
+      modelStore: model-store/meta-llama/llama-3.2-1b-instruct-gguf:v1
+      vmClass: best-effort-large
+      cliArgs:
+        - '--metrics'
+    qwen2.5-coder-1.5b:
+      modelStore: model-store/meta-llama/llama-3.2-3b-instruct:v1
+      engineImage: vllm/vllm-openai:v0.32.0
+      vmClass: gpu-a100-small-8c
+      cliArgs:
+        - '--tensor-parallel-size=1'
+        - '--gpu-memory-utilization=0.8'
+        - '--disable-custom-all-reduce'
+        - '--max-model-len=8192'
+resources:
+  CCI_Supervisor_Namespace_1:
+    type: CCI.Supervisor.Namespace
+    metadata:
+      layoutPosition:
+        - 0
+        - 0
+    properties:
+      name: ${variable.namespaceName}
+      existing: true
+  CCI_Supervisor_Resource_1:
+    type: CCI.Supervisor.Resource
+    metadata:
+      layoutPosition:
+        - 0
+        - 0
+    properties:
+      context: ${resource.CCI_Supervisor_Namespace_1.id}
+      wait:
+        conditions:
+          - type: Ready
+            status: 'True'
+      manifest:
+        apiVersion: pais.vmware.com/v1alpha1
+        kind: ModelEndpoint
+        metadata:
+          annotations: null
+          # name: '${replace(replace(input.modelName, "model-store/", ""), "/", "-")}'
+          # name: vcf-automation-blueprint-modelendpoint
+          name: modelendpoint-${env.shortDeploymentId}
+        spec:
+          engine: '${contains(input.overrideGpuProfile ? input.gpuProfileOverride : variable.modelToClassMap[input.modelName].vmClass, "gpu") ? "vLLM" : "LlamaCPP"}'
+          inferenceServerCustomization:
+            cliArgs: ${variable.modelToClassMap[input.modelName].cliArgs}
+            engineImage: ${propgroup.vpaif_dlvm_properties.harbor}/${variable.modelToClassMap[input.modelName].engineImage}
+            engineImageCompressedSize: 20Gi
+            envVars: null
+            sharedMemoryMountSize: 2Gi
+            tempMountSize: 1Gi
+          model:
+            ociRef: ${propgroup.vpaif_dlvm_properties.harbor}/${variable.modelToClassMap[input.modelName].modelStore}
+          overrides: ''
+          podResourceOverrides:
+            nvidia.com/gpu: '${contains(input.overrideGpuProfile ? input.gpuProfileOverride : variable.modelToClassMap[input.modelName].vmClass, "gpu") ? "1" : "0"}'
+          replicas: 1
+          routingName: ${input.routingName}
+          storageClassName: ${propgroup.vpaif_dlvm_properties.storageClass}
+          type: Completions
+          virtualMachineClassName: '${input.overrideGpuProfile ? input.gpuProfileOverride : variable.modelToClassMap[input.modelName].vmClass}'
+outputs:
+  __deploymentOverview:
+    value: |
+      ### Sample Request
+
+      curl https://pais91.pse.lab/api/v1/compatibility/openai/v1/Completions \
+        -H "Content-Type: application/json" \
+        -d '{
+              "model": "${replace(input.modelName, "model-store/", "")}",
+              "prompt": "What is the capital of the United States?",
+              "max_tokens": 200,
+              "temperature": 0
+            }'

@@ -11,6 +11,7 @@ blueprint for running an NVIDIA NIM container directly.
 | `AI Kubernetes cluster with NVIDIA Run-ai Control Plane.yaml` | **Phase 1** of the Run:ai setup. Creates a Kubernetes cluster (control-plane + general-purpose worker pool, no GPU) and installs a self-hosted NVIDIA Run:ai **control plane**. |
 | `AI Kubernetes cluster with NVIDIA Run-ai.yaml` | **Phase 2** of the Run:ai setup. Creates its own GPU-enabled Kubernetes cluster, installs the GPU Operator, and registers that cluster as a Run:ai **compute cluster** against an existing control plane (from Phase 1). Optionally installs Knative Serving + LeaderWorkerSet so the Run:ai "Inference" workload type works. |
 | `NVIDIA Nemotron-OCR.yaml` | Standalone single-VM blueprint (no Kubernetes). Deploys a GPU-enabled Deep Learning VM that runs NVIDIA's Nemotron-OCR NIM container directly via Docker. See [NVIDIA Nemotron-OCR VM](#nvidia-nemotron-ocr-vm) below. |
+| `Deploy Model Endpoint.yaml` | Standalone blueprint (no VM/Kubernetes provisioning). Deploys a `ModelEndpoint` custom resource into an existing Supervisor namespace, serving one of a few preset LLMs via vLLM or llama.cpp behind PAIS Model Runtime's OpenAI-compatible API. See [Deploy Model Endpoint](#deploy-model-endpoint) below. |
 
 The Run:ai control plane (Phase 1) and the Run:ai compute cluster (Phase 2) are two
 **separate Kubernetes clusters** — this matches Run:ai's normal multi-cluster architecture,
@@ -36,6 +37,8 @@ All three blueprints read from `${propgroup.vpaif_dlvm_properties.*}`:
   Run:ai Helm repo auth, `nvcr.io` image pull secret).
 - `NVIDIA Nemotron-OCR.yaml` uses `.harbor`, `.NGC_API_KEY`, `.hfToken`, `.paisApiToken`,
   `.storageClass`, and `.vmiImageName`.
+- `Deploy Model Endpoint.yaml` uses `.harbor` (model/engine image registry) and
+  `.storageClass`.
 
 This property group does not exist by default in a new environment/org — create it once
 before deploying any blueprint here by running
@@ -63,6 +66,10 @@ The GPU VM class `oneOf` lists are specific to *this* environment's Supervisor n
 will not necessarily exist elsewhere:
 - `workerVmClassName` in `AI Kubernetes cluster with NVIDIA Run-ai.yaml`
 - `vmClassName` in `NVIDIA Nemotron-OCR.yaml`
+- The GPU profile strings baked into `modelName`'s `oneOf` titles and the `gpuProfileOverride`
+  `oneOf` list in `Deploy Model Endpoint.yaml` (currently `gpu-a100-small-8c`,
+  `gpu-h100-small-11c`, `best-effort-large`), and the matching `vmClass` values in
+  `variable.modelToClassMap`
 
 Before deploying elsewhere, check what's actually available
 (`kubectl get virtualmachineclassbindings -n <namespace>`, or the VM Class list in your
@@ -274,3 +281,67 @@ has no dependency on the other two and can be deployed completely independently.
 - Like the GPU Operator job in the other blueprints, the vGPU license reference
   (`${propgroup.paif_dl_vgpu_ai_workshop_9w4np.vgpu_license}`) is tied to a specific
   namespace/workshop binding and may need correcting per deployment.
+
+## Deploy Model Endpoint
+
+`Deploy Model Endpoint.yaml` is unrelated to the Run:ai/Nemotron-OCR blueprints above — it
+provisions no VM or Kubernetes cluster. It creates a single `pais.vmware.com/v1alpha1
+ModelEndpoint` custom resource (via `CCI.Supervisor.Resource`) in an **existing** Supervisor
+namespace, which PAIS Model Runtime turns into a running vLLM or llama.cpp inference server
+exposed through its OpenAI-compatible API.
+
+### What it deploys
+
+The model picked in the `modelName` input drives everything else via
+`variable.modelToClassMap`, keyed by model:
+
+| Model (`modelName` value) | GPU profile (`vmClass`) | Engine | Notes |
+|---|---|---|---|
+| `llama-3.2-3b-instruct` | `gpu-a100-small-8c` | vLLM | fp8 KV cache, `llama3_json` tool-call parser, auto tool choice |
+| `llama-3.1-8b-instruct` | `gpu-a100-small-8c` | vLLM | AWQ int4 quantization (`--quantization=awq --dtype=half`), 6144 max context |
+| `qwen2.5-coder-1.5b` | `gpu-a100-small-8c` | vLLM | 8192 max context |
+| `llama-3.2-1b-instruct-gguf` | `best-effort-large` | llama.cpp | CPU-only; only `--metrics` is passed |
+
+For each model, `modelToClassMap` supplies `modelStore` (the Harbor OCI path the model is
+pulled from), `engineImage` (vLLM image tag — not set for the llama.cpp entry, see
+[Known issues](#known-issues-to-verify) below), `vmClass`, and the `cliArgs` passed to the
+inference server. `engine` is actually derived at deploy time from whichever `vmClass` is in
+effect (`contains(vmClass, "gpu") ? "vLLM" : "LlamaCPP"`), not from a dedicated field, so
+swapping in a non-GPU override (see below) also flips the engine.
+
+### Inputs
+
+| Input | Purpose |
+|---|---|
+| `modelName` | Which model to deploy. Each `oneOf` title shows the GPU profile that model will use, so the recommendation is visible before deploying. |
+| `overrideGpuProfile` | Checkbox. When checked, `gpuProfileOverride` is used instead of the model's recommended `vmClass`. |
+| `gpuProfileOverride` | GPU profile to use instead of the default, when `overrideGpuProfile` is checked. Always visible on the form; ignored unless the checkbox is on. Options are environment-specific VM classes (`gpu-a100-small-8c`, `gpu-h100-small-11c`, `best-effort-large`) — see [Before you deploy, item 3](#before-you-deploy-required). |
+| `routingName` | The route name clients call the model at (`spec.routingName`). No default — must be supplied. |
+
+Overriding the GPU profile does **not** adjust `cliArgs` or `engineImage` — those stay tied to
+the selected model. Picking a GPU profile that's a poor fit for the model (too little VRAM, or
+overriding a GPU model to `best-effort-large` and flipping the engine to llama.cpp while vLLM
+`cliArgs` are still being passed) is a real possibility with this input combination.
+
+### Outputs
+
+`__deploymentOverview` prints a sample `curl` against the OpenAI-compatible Completions
+endpoint once deployed.
+
+### Known issues to verify
+
+Found while reviewing this blueprint — not yet fixed, since they touch deploy-time expression
+behavior that's hard to verify without a live VCF Automation environment:
+
+- **Undefined `engineImage` for the CPU model**: `inferenceServerCustomization.engineImage`
+  unconditionally reads `variable.modelToClassMap[input.modelName].engineImage`, but the
+  `llama-3.2-1b-instruct-gguf` entry has no `engineImage` key. Selecting that model will resolve
+  this to an image path built from an undefined value.
+- **Sample curl uses the wrong field**: the `__deploymentOverview` sample request builds
+  `"model"` from `input.modelName`, but the endpoint actually routes on `input.routingName`
+  (`spec.routingName`). If a custom routing name is supplied, the printed sample command won't
+  match the deployed endpoint.
+- **`qwen2.5-coder-1.5b`'s `modelStore`** points at
+  `model-store/meta-llama/llama-3.2-3b-instruct:v1` — the same path as the Llama entry. This
+  looks like a copy/paste leftover rather than an actual Qwen model artifact; worth confirming
+  against what's really in Harbor before relying on the Qwen option.
